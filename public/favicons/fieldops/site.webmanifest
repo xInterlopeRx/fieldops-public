@@ -1,0 +1,11 @@
+{
+  "name": "FieldOps",
+  "short_name": "FieldOps",
+  "icons": [
+    { "src": "/favicons/fieldops/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/favicons/fieldops/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "theme_color": "#0B172A",
+  "background_color": "#0B172A",
+  "display": "standalone"
+}

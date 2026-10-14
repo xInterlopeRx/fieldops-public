@@ -1,0 +1,2203 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+    font-family: "Manrope";
+    src: url("/fonts/manrope/Manrope-Variable.woff") format("woff");
+    font-style: normal;
+    font-weight: 200 800;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Inter";
+    src: url("/fonts/inter/InterVariable.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Inter";
+    src: url("/fonts/inter/InterVariable-Italic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-Thin.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 100;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-ExtraLight.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 200;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-Light.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 300;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-SemiBold.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-ExtraBold.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-ThinItalic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 100;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-ExtraLightItalic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 200;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-LightItalic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 300;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-Italic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-MediumItalic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 500;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-SemiBoldItalic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 600;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-BoldItalic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 700;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "JetBrains Mono";
+    src: url("/fonts/jetbrains-mono/JetBrainsMono-ExtraBoldItalic.woff2") format("woff2");
+    font-style: italic;
+    font-weight: 800;
+    font-display: swap;
+}
+
+@layer base {
+    :root {
+        --fieldops-blue: #3b82f6;
+        --fieldops-blue-dark: #2563eb;
+        --fieldops-blue-strong: #1d4ed8;
+        --fieldops-blue-light: #dbeafe;
+        --fieldops-orange: #f97316;
+        --fieldops-navy: #08132e;
+        --fieldops-white: #ffffff;
+        --fieldops-success: #2e8b57;
+        --fieldops-success-dark: #236b43;
+        --fieldops-success-light: #e8f5ec;
+        --fieldops-warning: #d97706;
+        --fieldops-warning-dark: #b45309;
+        --fieldops-warning-light: #fef3c7;
+        --fieldops-danger: #dc2626;
+        --fieldops-danger-dark: #b91c1c;
+        --fieldops-danger-light: #fee2e2;
+        --fieldops-magenta: #c03a7a;
+        --fieldops-magenta-dark: #972d60;
+        --fieldops-magenta-light: #f9e6f0;
+        --fieldops-purple: #7c3aed;
+        --fieldops-purple-dark: #6b21a8;
+        --fieldops-purple-light: #f3e8ff;
+        --fieldops-slate: #475569;
+        --fieldops-slate-dark: #334155;
+        --fieldops-slate-light: #e2e8f0;
+        --fieldops-archive: var(--fieldops-slate);
+        --fieldops-tab-inactive: var(--fieldops-slate-light);
+
+        --font-brand: "Manrope", "Avenir Next", "Segoe UI", Arial, sans-serif;
+        --font-ui: "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        --font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+        --fieldops-page: #f8fafc;
+        --fieldops-surface-soft: #e2e8f0;
+        --fieldops-border: #94a3b8;
+        --fieldops-border-strong: #64748b;
+        --fieldops-border-subtle: #cbd5e1;
+        --fieldops-ink: #08132e;
+
+        /* Legacy component tokens kept as aliases while styles are migrated. */
+        --fieldops-green: var(--fieldops-success);
+        --fieldops-green-dark: var(--fieldops-success-dark);
+        --fieldops-mint: var(--fieldops-surface-soft);
+    }
+
+    html {
+        background: var(--fieldops-page);
+        font-family: var(--font-ui);
+    }
+
+    body {
+        min-width: 320px;
+        background: var(--fieldops-page);
+        color: var(--fieldops-ink);
+        font-family: var(--font-ui);
+        line-height: 1.5;
+    }
+
+    h1,
+    h2,
+    h3 {
+        font-family: var(--font-brand);
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+        font-family: var(--font-ui);
+    }
+
+    #app {
+        transition:
+            opacity 180ms ease,
+            transform 180ms ease;
+    }
+
+    #app.fieldops-navigating {
+        opacity: 0.72;
+        transform: translateY(4px);
+    }
+
+    a {
+        color: var(--fieldops-blue-dark);
+        transition: color 150ms ease;
+    }
+
+    a:hover {
+        color: var(--fieldops-blue-dark);
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+        font: inherit;
+    }
+
+    ::selection {
+        background: var(--fieldops-blue-dark);
+        color: var(--fieldops-white);
+    }
+}
+
+@layer utilities {
+    .font-brand {
+        font-family: var(--font-brand);
+    }
+
+    .font-mono {
+        font-family: var(--font-mono);
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+@layer components {
+    .fieldops-brand-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        min-height: 5.25rem;
+        border: 1px solid rgb(255 255 255 / 14%);
+        border-radius: 8px;
+        background: var(--fieldops-navy);
+        padding: 1rem clamp(1rem, 3vw, 1.75rem);
+        color: white;
+        box-shadow: 0 8px 24px rgb(8 19 46 / 16%);
+    }
+
+    .fieldops-brand-lockup {
+        display: inline-flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.2rem 0.65rem;
+        color: var(--fieldops-white);
+        text-decoration: none;
+    }
+
+    .fieldops-brand-lockup:hover {
+        color: var(--fieldops-orange);
+    }
+
+    .fieldops-brand-lockup:focus-visible {
+        border-radius: 6px;
+        outline: 3px solid var(--fieldops-orange);
+        outline-offset: 4px;
+    }
+
+    .fieldops-brand-name {
+        color: var(--fieldops-white);
+        font-family: var(--font-brand);
+        font-size: clamp(1.45rem, 3vw, 1.85rem);
+        font-weight: 800;
+        letter-spacing: -0.045em;
+        line-height: 1;
+    }
+
+    .fieldops-brand-name span {
+        color: var(--fieldops-orange);
+        font-weight: 600;
+    }
+
+    .fieldops-brand-subtitle {
+        border-left: 1px solid rgb(255 255 255 / 30%);
+        padding-left: 0.65rem;
+        color: #d7e0ef;
+        font-size: 0.8rem;
+        letter-spacing: 0.025em;
+    }
+
+    .fieldops-brand-tag {
+        border: 1px solid rgb(255 255 255 / 35%);
+        border-radius: 999px;
+        padding: 0.4rem 0.75rem;
+        color: var(--fieldops-white);
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-align: center;
+        text-transform: uppercase;
+    }
+
+    .fieldops-primary-link {
+        display: inline-flex;
+        min-height: 2.875rem;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--fieldops-blue-dark);
+        border-radius: 8px;
+        background: var(--fieldops-blue-dark);
+        padding: 0.65rem 1.2rem;
+        color: var(--fieldops-white);
+        font-size: 0.8rem;
+        font-weight: 700;
+        letter-spacing: 0.045em;
+        text-decoration: none;
+        transition:
+            background-color 150ms ease,
+            border-color 150ms ease,
+            transform 150ms ease;
+    }
+
+    .fieldops-primary-link:hover {
+        border-color: var(--fieldops-blue-dark);
+        background: var(--fieldops-blue-dark);
+        color: var(--fieldops-white);
+        transform: translateY(-1px);
+    }
+
+    .fieldops-primary-link:focus-visible {
+        outline: 3px solid var(--fieldops-blue-strong);
+        outline-offset: 3px;
+    }
+
+    .fieldops-guest-shell,
+    .fieldops-app-shell {
+        background: var(--fieldops-page);
+    }
+
+    .fieldops-panel {
+        border: 1px solid var(--fieldops-border);
+        border-radius: 8px;
+        box-shadow:
+            0 4px 12px rgb(8 19 46 / 6%),
+            0 16px 36px rgb(8 19 46 / 5%);
+    }
+
+    .fieldops-directory-empty-details {
+        min-height: 20rem;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        overflow: hidden;
+        border: 1px solid var(--fieldops-border);
+        border-top: 4px solid var(--fieldops-blue);
+        border-radius: 8px;
+        background: var(--fieldops-white);
+        box-shadow: 0 8px 28px rgb(8 19 46 / 10%);
+        text-align: left;
+    }
+
+    .fieldops-workspace-fixed-header {
+        display: flex;
+        min-height: 4.25rem;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        border-bottom: 1px solid var(--fieldops-border);
+        background: var(--fieldops-page);
+        padding: 0.75rem 1rem;
+    }
+
+    .fieldops-workspace-title {
+        margin: 0;
+        color: var(--fieldops-ink);
+        font-size: 1rem;
+        font-weight: 700;
+        line-height: 1.25;
+    }
+
+    .fieldops-directory-empty-details__body {
+        min-height: 0;
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 1rem;
+    }
+
+    .fieldops-admin-directory-list-column {
+        display: flex;
+        min-height: 0;
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .fieldops-admin-directory-results {
+        display: flex;
+        min-height: 0;
+        flex: 1 1 auto;
+        flex-direction: column;
+    }
+
+    .fieldops-admin-directory-cards {
+        min-height: 0;
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 0.5rem 0.75rem;
+        scrollbar-gutter: stable;
+    }
+
+    @media (min-width: 40rem) {
+        .fieldops-workspace-fixed-header {
+            padding-right: 1.5rem;
+            padding-left: 1.5rem;
+        }
+    }
+
+    .fieldops-nav {
+        border-color: rgb(255 255 255 / 12%);
+        background: var(--fieldops-navy);
+        color: var(--fieldops-white);
+    }
+
+    .fieldops-page-header {
+        border-bottom: 1px solid var(--fieldops-border);
+        background: var(--fieldops-surface-soft);
+    }
+
+    .fieldops-button {
+        display: inline-flex;
+        align-items: center;
+        border: 0;
+        border-radius: 8px;
+        background: var(--fieldops-blue-dark);
+        padding: 0.625rem 1.25rem;
+        color: var(--fieldops-white);
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        transition:
+            background-color 150ms ease,
+            transform 150ms ease;
+    }
+
+    .fieldops-button:hover {
+        background: var(--fieldops-navy);
+        color: var(--fieldops-white);
+        transform: translateY(-1px);
+    }
+
+    .fieldops-client-input {
+        width: 100%;
+        border: 1px solid var(--fieldops-border-strong);
+        border-radius: 8px;
+        background: var(--fieldops-white);
+        padding: 0.65rem 0.75rem;
+        color: var(--fieldops-ink);
+        outline: none;
+    }
+
+    .fieldops-directory-search-input {
+        min-height: 2.25rem;
+        border-radius: 0.5rem;
+        padding: 0.4rem 0.65rem;
+        font-size: 0.875rem;
+    }
+
+    .fieldops-directory-search-button {
+        min-height: 2.25rem;
+        flex: 0 0 auto;
+        border-radius: 0.5rem;
+        padding: 0.35rem 0.75rem;
+        font-size: 0.65rem;
+    }
+
+    .fieldops-directory-search-button--icon {
+        width: 2.5rem;
+        justify-content: center;
+        padding-right: 0;
+        padding-left: 0;
+    }
+
+    .fieldops-pagination {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: center;
+        column-gap: clamp(0.75rem, 2vw, 1.5rem);
+        border-top: 1px solid var(--fieldops-border);
+        background: var(--fieldops-white);
+        padding: 0.75rem 1rem;
+    }
+
+    .fieldops-pagination > :first-child {
+        justify-self: end;
+    }
+
+    .fieldops-pagination > :last-child {
+        justify-self: start;
+    }
+
+    .fieldops-pagination-chevron {
+        display: inline-grid;
+        width: 2.75rem;
+        height: 2.75rem;
+        place-items: center;
+        border: 1px solid var(--fieldops-blue-dark);
+        border-radius: 8px;
+        background: var(--fieldops-blue-dark);
+        color: var(--fieldops-white);
+        box-shadow: 0 4px 12px rgb(8 19 46 / 16%);
+        transition:
+            background-color 150ms ease,
+            border-color 150ms ease,
+            transform 150ms ease;
+    }
+
+    .fieldops-pagination-chevron:hover:not(:disabled) {
+        transform: translateY(-1px);
+        border-color: var(--fieldops-blue-dark);
+        background: var(--fieldops-navy);
+    }
+
+    .fieldops-pagination-chevron:focus-visible {
+        outline: 3px solid var(--fieldops-blue-strong);
+        outline-offset: 3px;
+    }
+
+    .fieldops-pagination-chevron--disabled {
+        border-color: var(--fieldops-border);
+        background: var(--fieldops-tab-inactive);
+        color: #6b7280;
+        box-shadow: none;
+        cursor: not-allowed;
+    }
+
+    .fieldops-pagination-summary {
+        min-width: max-content;
+        color: var(--fieldops-ink);
+        font-size: 0.9rem;
+        font-weight: 700;
+        text-align: center;
+    }
+
+    .fieldops-workspace-backdrop {
+        position: fixed;
+        z-index: 110;
+        inset: 0;
+        display: flex;
+        justify-content: flex-end;
+        background: rgb(8 19 46 / 58%);
+    }
+
+    .fieldops-workspace-backdrop--nested {
+        z-index: 120;
+    }
+
+    .fieldops-workspace-panel {
+        display: flex;
+        width: min(100%, 54rem);
+        height: 100%;
+        flex-direction: column;
+        overflow: hidden;
+        background: var(--fieldops-white);
+        box-shadow: -16px 0 48px rgb(8 19 46 / 22%);
+    }
+
+    @media (min-width: 64rem) {
+        .fieldops-workspace-backdrop--inline-desktop {
+            position: sticky;
+            z-index: auto;
+            inset: auto;
+            display: block;
+            width: 100%;
+            height: 100%;
+            min-width: 0;
+            align-self: stretch;
+            background: transparent;
+        }
+
+        .fieldops-workspace-panel--inline-desktop {
+            width: 100%;
+            height: 100%;
+            min-height: 0;
+            border: 1px solid var(--fieldops-border);
+            border-top: 4px solid var(--fieldops-blue);
+            border-radius: 8px;
+            box-shadow: 0 8px 28px rgb(8 19 46 / 12%);
+        }
+
+        .fieldops-workspace-panel--inline-desktop > header {
+            background: var(--fieldops-page);
+        }
+
+        .fieldops-directory-empty-details {
+            height: 100%;
+            min-height: 0;
+        }
+
+        .fieldops-admin-directory-grid {
+            height: min(64rem, calc(100vh - 19rem));
+            max-height: min(64rem, calc(100vh - 19rem));
+            min-height: min(32rem, calc(100vh - 19rem));
+            align-items: stretch;
+            grid-template-rows: minmax(0, 1fr);
+        }
+    }
+
+    .fieldops-workspace-tabs {
+        display: flex;
+        flex: 0 0 auto;
+        gap: 0.35rem;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--fieldops-border);
+        padding: 0.5rem 1rem 0;
+        scrollbar-width: thin;
+    }
+
+    .fieldops-workspace-tab {
+        min-height: 2.75rem;
+        flex: 0 0 auto;
+        border: 1px solid transparent;
+        border-bottom: 0;
+        border-radius: 8px 8px 0 0;
+        background: var(--fieldops-tab-inactive);
+        padding: 0.5rem 0.85rem;
+        color: var(--fieldops-ink);
+        font-size: 0.8rem;
+        font-weight: 700;
+    }
+
+    .fieldops-workspace-tab--active {
+        background: var(--fieldops-blue-dark);
+        color: var(--fieldops-white);
+    }
+
+    .fieldops-workspace-tab:focus-visible,
+    .fieldops-workspace-list-row:focus-visible {
+        outline: 3px solid var(--fieldops-blue-strong);
+        outline-offset: 2px;
+    }
+
+    .fieldops-workspace-scroll {
+        min-height: 0;
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 1rem;
+    }
+
+    .fieldops-workspace-accordion {
+        overflow: hidden;
+        border: 1px solid var(--fieldops-border);
+        border-radius: 8px;
+        background: var(--fieldops-white);
+    }
+
+    .fieldops-workspace-accordion__summary {
+        display: flex;
+        min-height: 2.5rem;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        cursor: pointer;
+        list-style: none;
+        background: var(--fieldops-surface-soft);
+        padding: 0.5rem 0.75rem;
+        color: var(--fieldops-ink);
+        font-size: 0.875rem;
+        font-weight: 700;
+    }
+
+    .fieldops-workspace-accordion__summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .fieldops-workspace-accordion__summary::after {
+        content: "+";
+        color: var(--fieldops-slate);
+        font-size: 1.125rem;
+        line-height: 1;
+    }
+
+    .fieldops-workspace-accordion[open] > .fieldops-workspace-accordion__summary::after {
+        content: "−";
+    }
+
+    .fieldops-workspace-accordion__summary:focus-visible {
+        outline: 3px solid var(--fieldops-blue-strong);
+        outline-offset: -3px;
+    }
+
+    .fieldops-workspace-field {
+        display: grid;
+        gap: 0.35rem;
+        color: #374151;
+        font-size: 0.8125rem;
+        font-weight: 600;
+    }
+
+    .fieldops-workspace-field input,
+    .fieldops-workspace-field select,
+    .fieldops-workspace-field textarea {
+        width: 100%;
+        min-height: 2.75rem;
+        border: 1px solid var(--fieldops-border);
+        border-radius: 8px;
+        background: var(--fieldops-white);
+        padding: 0.5rem 0.65rem;
+        color: var(--fieldops-ink);
+        font-size: 0.875rem;
+        font-weight: 400;
+    }
+
+    .fieldops-workspace-field textarea {
+        min-height: 6rem;
+        resize: vertical;
+    }
+
+    .fieldops-workspace-field input:focus-visible,
+    .fieldops-workspace-field select:focus-visible,
+    .fieldops-workspace-field textarea:focus-visible {
+        outline: 3px solid var(--fieldops-blue-dark);
+        outline-offset: 1px;
+    }
+
+    .fieldops-workspace-field input:read-only,
+    .fieldops-workspace-field textarea:read-only,
+    .fieldops-workspace-field select:disabled {
+        background: var(--fieldops-page);
+        color: #374151;
+    }
+
+    .fieldops-workspace-remove {
+        display: inline-flex;
+        min-height: 2.75rem;
+        align-items: center;
+        justify-self: start;
+        color: var(--fieldops-danger);
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+    }
+
+    .fieldops-workspace-list-row {
+        display: flex;
+        width: 100%;
+        min-height: 3.75rem;
+        align-items: center;
+        gap: 0.75rem;
+        border: 1px solid var(--fieldops-border);
+        border-radius: 8px;
+        background: var(--fieldops-white);
+        padding: 0.65rem 0.8rem;
+        color: var(--fieldops-ink);
+        text-align: left;
+    }
+
+    .fieldops-workspace-list-row:hover {
+        background: var(--fieldops-page);
+    }
+
+    .fieldops-workspace-list-row small {
+        display: block;
+        margin-top: 0.2rem;
+        color: #6b7280;
+        font-size: 0.7rem;
+    }
+
+    .fieldops-assignment-dropdown {
+        position: relative;
+        width: 100%;
+    }
+
+    .fieldops-assignment-trigger {
+        display: flex;
+        width: 100%;
+        min-height: 2.75rem;
+        align-items: center;
+        gap: 0.65rem;
+        border: 1px solid var(--fieldops-border-strong);
+        border-radius: 8px;
+        background: var(--fieldops-white);
+        padding: 0.5rem 0.7rem;
+        color: var(--fieldops-ink);
+        font-size: 0.85rem;
+        text-align: left;
+    }
+
+    .fieldops-assignment-trigger:disabled {
+        background: var(--fieldops-page);
+        color: #374151;
+        cursor: not-allowed;
+    }
+
+    .fieldops-assignment-trigger:focus-visible {
+        outline: 3px solid var(--fieldops-blue-dark);
+        outline-offset: 1px;
+    }
+
+    .fieldops-assignment-count {
+        min-width: 1.5rem;
+        border-radius: 9999px;
+        background: var(--fieldops-tab-inactive);
+        padding: 0.1rem 0.35rem;
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-align: center;
+    }
+
+    .fieldops-assignment-options {
+        position: absolute;
+        z-index: 20;
+        right: 0;
+        bottom: calc(100% + 0.4rem);
+        left: 0;
+        max-height: min(18rem, 45vh);
+        overflow-y: auto;
+        border: 1px solid var(--fieldops-border);
+        border-radius: 8px;
+        background: var(--fieldops-white);
+        box-shadow: 0 12px 28px rgb(8 19 46 / 18%);
+    }
+
+    .fieldops-assignment-option {
+        display: flex;
+        min-height: 2.9rem;
+        align-items: center;
+        gap: 0.65rem;
+        border-bottom: 1px solid #eef0f3;
+        padding: 0.45rem 0.7rem;
+        color: var(--fieldops-ink);
+        font-size: 0.8rem;
+    }
+
+    .fieldops-assignment-option:last-child {
+        border-bottom: 0;
+    }
+
+    .fieldops-assignment-option input {
+        width: 1.1rem;
+        height: 1.1rem;
+        flex: 0 0 auto;
+    }
+
+    .fieldops-workspace-footer {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        border-top: 1px solid var(--fieldops-border);
+        background: var(--fieldops-white);
+        padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+    }
+
+    .fieldops-delete-action {
+        display: inline-flex;
+        min-height: 2.75rem;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--fieldops-danger);
+        border-radius: 8px;
+        background: var(--fieldops-danger);
+        padding: 0.45rem 0.8rem;
+        color: var(--fieldops-white);
+        font-size: 0.7rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .fieldops-delete-action:disabled {
+        border-color: var(--fieldops-border-subtle);
+        background: var(--fieldops-surface-soft);
+        color: var(--fieldops-slate);
+        cursor: not-allowed;
+    }
+
+    .fieldops-delete-action:not(:disabled):hover {
+        background: #b91c1c;
+    }
+
+    .fieldops-client-input:focus {
+        border-color: var(--fieldops-blue-dark);
+        box-shadow: 0 0 0 3px rgb(37 99 235 / 22%);
+    }
+
+    .fieldops-submit-action,
+    .fieldops-secondary-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        padding: 0.65rem 1rem;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        text-decoration: none;
+    }
+
+    .fieldops-submit-action {
+        border: 1px solid var(--fieldops-blue-dark);
+        background: var(--fieldops-blue-dark);
+        color: var(--fieldops-white);
+        cursor: pointer;
+    }
+
+    .fieldops-submit-action:hover {
+        border-color: var(--fieldops-navy);
+        background: var(--fieldops-navy);
+        color: var(--fieldops-white);
+    }
+
+    .fieldops-submit-action:disabled {
+        cursor: wait;
+        opacity: 0.6;
+    }
+
+    .fieldops-secondary-action {
+        border: 1px solid var(--fieldops-border-strong);
+        background: var(--fieldops-white);
+        color: var(--fieldops-ink);
+        cursor: pointer;
+    }
+
+    .fieldops-secondary-action:hover {
+        border-color: #9ca3af;
+        background: var(--fieldops-page);
+        color: var(--fieldops-ink);
+    }
+
+    .fieldops-secondary-action:disabled {
+        border-color: var(--fieldops-border-subtle);
+        background: var(--fieldops-surface-soft);
+        color: var(--fieldops-slate);
+        cursor: not-allowed;
+        opacity: 0.65;
+    }
+
+    .fieldops-secondary-action:disabled:hover {
+        border-color: var(--fieldops-border-subtle);
+        background: var(--fieldops-surface-soft);
+        color: var(--fieldops-slate);
+    }
+
+    .fieldops-job-workspace .fieldops-secondary-action {
+        border-color: var(--fieldops-blue-light);
+        background: var(--fieldops-blue-light);
+        color: var(--fieldops-blue-strong);
+    }
+
+    .fieldops-job-workspace .fieldops-secondary-action:not(:disabled):hover {
+        border-color: var(--fieldops-blue);
+        background: var(--fieldops-blue-light);
+        color: var(--fieldops-navy);
+    }
+
+    .fieldops-job-workspace .fieldops-submit-action {
+        border-color: var(--fieldops-success-light);
+        background: var(--fieldops-success-light);
+        color: var(--fieldops-success-dark);
+    }
+
+    .fieldops-job-workspace .fieldops-submit-action:not(:disabled):hover {
+        border-color: var(--fieldops-success);
+        background: var(--fieldops-success);
+        color: var(--fieldops-white);
+    }
+
+    .fieldops-edit-action {
+        border-color: var(--fieldops-warning-light);
+        background: var(--fieldops-warning-light);
+        color: var(--fieldops-ink);
+    }
+
+    .fieldops-edit-action:not(:disabled):hover {
+        border-color: var(--fieldops-warning);
+        background: var(--fieldops-warning-light);
+        color: var(--fieldops-ink);
+    }
+
+    .fieldops-job-workspace .fieldops-secondary-action.fieldops-edit-action:not(:disabled) {
+        border-color: var(--fieldops-warning-light);
+        background: var(--fieldops-warning-light);
+        color: var(--fieldops-ink);
+    }
+
+    .fieldops-job-workspace .fieldops-secondary-action.fieldops-edit-action:not(:disabled):hover {
+        border-color: var(--fieldops-warning);
+        background: var(--fieldops-warning-light);
+        color: var(--fieldops-ink);
+    }
+
+    .fieldops-add-action:not(:disabled) {
+        border-color: var(--fieldops-success-light);
+        background: var(--fieldops-success-light);
+        color: var(--fieldops-success-dark);
+    }
+
+    .fieldops-add-action:not(:disabled):hover {
+        border-color: var(--fieldops-success);
+        background: var(--fieldops-success);
+        color: var(--fieldops-white);
+    }
+
+    .fieldops-client-input:focus-visible,
+    .fieldops-submit-action:focus-visible,
+    .fieldops-secondary-action:focus-visible {
+        outline: 3px solid var(--fieldops-blue-strong);
+        outline-offset: 2px;
+    }
+
+    .fieldops-calendar {
+        min-height: calc(100vh - 5.5rem);
+        width: min(100%, 120rem);
+        margin-inline: auto;
+        background: var(--fieldops-page);
+        padding: clamp(1rem, 2.5vw, 2rem);
+        transition: padding 220ms ease;
+    }
+
+    .calendar-header,
+    .calendar-view-controls,
+    .calendar-navigation,
+    .calendar-content {
+        transition:
+            gap 220ms ease,
+            padding 220ms ease,
+            width 220ms ease,
+            transform 220ms ease;
+    }
+}
+
+@layer components {
+.fieldops-topbar-inner {
+    display: grid;
+    position: relative;
+    z-index: 70;
+    width: min(100%, 120rem);
+    min-height: 4.675rem;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: clamp(0.35rem, 1vw, 0.85rem);
+    margin-inline: auto;
+    padding: 0.6375rem clamp(0.85rem, 2.125vw, 1.7rem);
+}
+
+.fieldops-header-search-shell {
+    position: relative;
+    z-index: 80;
+    width: auto;
+    flex: 0 1 auto;
+}
+
+.fieldops-topbar-actions {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    width: 100%;
+    grid-column: 3;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.fieldops-global-search {
+    position: relative;
+    width: 3rem;
+    flex: 0 1 auto;
+    transition: width 170ms ease;
+}
+
+.fieldops-global-search--expanded {
+    width: min(33rem, calc(50vw - 6rem));
+    min-width: 12rem;
+}
+
+.fieldops-global-search__toggle {
+    display: inline-grid;
+    width: 3rem;
+    height: 3rem;
+    place-items: center;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: #d1d5db;
+    cursor: pointer;
+}
+
+.fieldops-global-search__toggle-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.fieldops-global-search__toggle:hover {
+    background: rgb(255 255 255 / 10%);
+    color: var(--fieldops-white);
+}
+
+.fieldops-global-search__toggle:focus-visible {
+    outline: 3px solid var(--fieldops-orange);
+    outline-offset: 2px;
+}
+
+.fieldops-global-search__clear:focus-visible {
+    outline: 3px solid var(--fieldops-blue-strong);
+    outline-offset: 1px;
+}
+
+.fieldops-global-search__field {
+    position: relative;
+    display: flex;
+    width: 100%;
+    align-items: center;
+}
+
+.fieldops-global-search__icon {
+    position: absolute;
+    z-index: 1;
+    left: 0.765rem;
+    width: 1.02rem;
+    height: 1.02rem;
+    color: var(--fieldops-blue-dark);
+    pointer-events: none;
+}
+
+.fieldops-global-search__input {
+    width: 100%;
+    height: 2.75rem;
+    min-height: 2.75rem;
+    border-radius: 8px;
+    padding: 0.34rem 2.75rem 0.34rem 2.38rem;
+}
+
+.fieldops-global-search__input::-webkit-search-cancel-button,
+.fieldops-clearable-search__input::-webkit-search-cancel-button {
+    appearance: none;
+}
+
+.fieldops-global-search__clear {
+    position: absolute;
+    top: 50%;
+    right: 0.45rem;
+    display: inline-grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    transform: translateY(-50%);
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #53617a;
+    cursor: pointer;
+}
+
+.fieldops-global-search__clear:hover {
+    background: #eef1f5;
+    color: var(--fieldops-ink);
+}
+
+.fieldops-clearable-search {
+    position: relative;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.fieldops-clearable-search__input {
+    width: 100%;
+    min-width: 0;
+    padding-right: 3rem;
+}
+
+.fieldops-clearable-search__clear {
+    position: absolute;
+    top: 50%;
+    right: 0.35rem;
+    display: inline-grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    transform: translateY(-50%);
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #53617a;
+    cursor: pointer;
+}
+
+.fieldops-clearable-search__clear:hover {
+    background: #eef1f5;
+    color: var(--fieldops-ink);
+}
+
+.fieldops-clearable-search__clear:focus-visible {
+        outline: 3px solid var(--fieldops-blue-strong);
+    outline-offset: 1px;
+}
+
+.fieldops-global-search__suggestions {
+    position: absolute;
+    z-index: 80;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    left: 0;
+    max-height: min(20rem, 55vh);
+    overflow-y: auto;
+    border: 1px solid var(--fieldops-border);
+    border-radius: 8px;
+    background: var(--fieldops-white);
+    color: var(--fieldops-ink);
+    box-shadow: 0 14px 32px rgb(8 19 46 / 20%);
+}
+
+.fieldops-global-search__message {
+    margin: 0;
+    padding: 0.9rem 1rem;
+    color: #53617a;
+    font-size: 0.85rem;
+}
+
+.fieldops-global-search__option {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border: 0;
+    border-bottom: 1px solid var(--fieldops-border);
+    background: var(--fieldops-white);
+    padding: 0.7rem 1rem;
+    color: var(--fieldops-ink);
+    text-align: left;
+}
+
+.fieldops-global-search__option:last-child {
+    border-bottom: 0;
+}
+
+.fieldops-global-search__option:hover,
+.fieldops-global-search__option--active {
+    background: var(--fieldops-page);
+}
+
+.fieldops-global-search__option:focus-visible {
+    position: relative;
+    z-index: 1;
+    outline: 3px solid var(--fieldops-blue-dark);
+    outline-offset: -3px;
+}
+
+.fieldops-global-search__option-copy {
+    display: grid;
+    min-width: 0;
+    gap: 0.15rem;
+}
+
+.fieldops-global-search__option-heading {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.fieldops-global-search__option-heading strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fieldops-global-search__type,
+.fieldops-global-search__exact {
+    flex: 0 0 auto;
+    border-radius: 9999px;
+    background: var(--fieldops-tab-inactive);
+    padding: 0.15rem 0.45rem;
+    color: var(--fieldops-ink);
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-transform: uppercase;
+}
+
+.fieldops-global-search__exact {
+    background: var(--fieldops-success-light);
+    color: var(--fieldops-success-dark);
+}
+
+.fieldops-global-search__detail {
+    overflow: hidden;
+    color: #53617a;
+    font-size: 0.75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fieldops-brand-link {
+    display: inline-flex;
+    flex: 0 0 auto;
+    grid-column: 1;
+    justify-self: start;
+    align-items: center;
+    border-radius: 0.5rem;
+    color: var(--fieldops-white);
+    text-decoration: none;
+}
+
+.fieldops-brand-link:hover {
+    color: var(--fieldops-white);
+}
+
+.fieldops-app-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--fieldops-white);
+    font-family: var(--font-brand);
+    font-size: 0.935rem;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+}
+
+.fieldops-app-logo img {
+    display: block;
+    width: 3.06rem;
+    height: 3.06rem;
+    object-fit: contain;
+}
+
+.fieldops-brand-link:focus-visible,
+.fieldops-basic-profile-link:focus-visible,
+.fieldops-mobile-menu-button:focus-visible {
+    outline: 3px solid var(--fieldops-orange);
+    outline-offset: 3px;
+}
+
+.fieldops-schedule-link:focus-visible {
+    outline: 3px solid var(--fieldops-navy);
+    outline-offset: 3px;
+}
+
+.fieldops-logout-action:focus-visible {
+    outline: 3px solid var(--fieldops-blue-strong);
+    outline-offset: 3px;
+}
+
+.fieldops-admin-tab:focus-visible {
+    outline: 3px solid var(--fieldops-blue-strong);
+    outline-offset: 2px;
+}
+
+.fieldops-schedule-link {
+    display: inline-flex;
+    height: 3rem;
+    min-height: 3rem;
+    flex: 0 0 auto;
+    grid-column: 2;
+    justify-self: center;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    background: var(--fieldops-blue-dark);
+    padding: 0.3825rem 0.9775rem;
+    color: var(--fieldops-white);
+    text-align: center;
+    text-decoration: none;
+    transition:
+        background-color 150ms ease,
+        border-color 150ms ease,
+        box-shadow 150ms ease;
+}
+
+.fieldops-schedule-link:hover,
+.fieldops-schedule-link--active {
+    border-color: var(--fieldops-blue-dark);
+    background: var(--fieldops-blue-dark);
+    color: var(--fieldops-white);
+    box-shadow: 0 0 0 1px rgb(37 99 235 / 24%);
+}
+
+.fieldops-schedule-copy {
+    display: grid;
+    gap: 0.08rem;
+    line-height: 1.15;
+}
+
+.fieldops-schedule-copy strong {
+    font-family: var(--font-brand);
+    font-size: 0.85rem;
+    font-weight: 800;
+}
+
+.fieldops-schedule-copy small {
+    color: rgb(255 255 255 / 82%);
+    font-size: 0.578rem;
+    font-weight: 600;
+}
+
+.fieldops-admin-tabs-shell {
+    border-bottom: 1px solid var(--fieldops-border);
+    background: var(--fieldops-page);
+}
+
+.fieldops-admin-tabs {
+    display: flex;
+    width: min(100%, 120rem);
+    min-height: 3.4rem;
+    align-items: flex-end;
+    justify-content: flex-end;
+    gap: 0.425rem;
+    overflow-x: auto;
+    margin-inline: auto;
+    padding: 0.6375rem clamp(0.85rem, 2.125vw, 1.7rem) 0;
+    scrollbar-width: thin;
+}
+
+.fieldops-operations-subnav-shell {
+    border-bottom: 1px solid var(--fieldops-border);
+    background: var(--fieldops-white);
+}
+
+.fieldops-operations-subnav {
+    display: flex;
+    width: min(100%, 120rem);
+    min-height: 2.55rem;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.3rem;
+    overflow-x: auto;
+    margin-inline: auto;
+    padding: 0.25rem clamp(0.85rem, 2.125vw, 1.7rem);
+    scrollbar-width: thin;
+}
+
+.fieldops-operations-subnav-link {
+    display: inline-flex;
+    min-height: 2.75rem;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid transparent;
+    border-radius: 6px 6px 0 0;
+    background: var(--fieldops-tab-inactive);
+    padding: 0.3rem 0.65rem;
+    color: var(--fieldops-ink);
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-decoration: none;
+    transition:
+        background-color 150ms ease,
+        border-color 150ms ease,
+        color 150ms ease;
+}
+
+.fieldops-operations-subnav-link:hover {
+    border-color: var(--fieldops-border-strong);
+    background: var(--fieldops-surface-soft);
+    color: var(--fieldops-ink);
+}
+
+.fieldops-operations-subnav-link--active,
+.fieldops-operations-subnav-link--active:hover {
+    border-color: var(--fieldops-blue-dark);
+    background: var(--fieldops-blue-dark);
+    color: var(--fieldops-white);
+}
+
+.fieldops-operations-subnav-link--active.fieldops-operations-subnav-link--onboarding-active,
+.fieldops-operations-subnav-link--active.fieldops-operations-subnav-link--onboarding-active:hover {
+    border-color: var(--fieldops-orange);
+    background: var(--fieldops-orange);
+    color: var(--fieldops-navy);
+}
+
+.fieldops-operations-subnav-link:focus-visible {
+    outline: 3px solid var(--fieldops-blue-strong);
+    outline-offset: 2px;
+}
+
+.fieldops-operations-subnav-icon {
+    width: 0.9rem;
+    height: 0.9rem;
+    flex: 0 0 auto;
+}
+
+.fieldops-admin-tab {
+    display: inline-flex;
+    height: 2.75rem;
+    min-height: 2.75rem;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    border: 1px solid transparent;
+    border-radius: 8px 8px 0 0;
+    background: var(--fieldops-tab-inactive);
+    padding: 0 0.935rem;
+    color: var(--fieldops-ink);
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.2;
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+        height 150ms ease,
+        background-color 150ms ease,
+        border-color 150ms ease,
+        color 150ms ease;
+}
+
+.fieldops-admin-tab-icon {
+    width: 0.9775rem;
+    height: 0.9775rem;
+    flex: 0 0 auto;
+}
+
+.fieldops-admin-tab:hover {
+    border-color: var(--fieldops-border-strong);
+    background: var(--fieldops-surface-soft);
+    color: var(--fieldops-ink);
+}
+
+.fieldops-admin-tab--active,
+.fieldops-admin-tab--active:hover {
+    height: 3rem;
+    min-height: 3rem;
+    border-color: var(--fieldops-blue-dark);
+    background: var(--fieldops-blue-dark);
+    color: var(--fieldops-white);
+}
+
+.fieldops-admin-tab:focus-visible {
+    position: relative;
+    z-index: 1;
+    outline: 3px solid var(--fieldops-blue-strong);
+    outline-offset: 2px;
+}
+
+.fieldops-status-badge {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 0.2rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.fieldops-status-badge--success {
+    border-color: var(--fieldops-success);
+    background: var(--fieldops-success-light);
+    color: var(--fieldops-success-dark);
+}
+
+.fieldops-status-badge--warning {
+    border-color: var(--fieldops-warning-dark);
+    background: var(--fieldops-warning-light);
+    color: var(--fieldops-warning-dark);
+}
+
+.fieldops-status-badge--danger {
+    border-color: var(--fieldops-danger);
+    background: var(--fieldops-danger-light);
+    color: var(--fieldops-danger-dark);
+}
+
+.fieldops-status-badge--archive {
+    border-color: var(--fieldops-archive);
+    background: var(--fieldops-slate-light);
+    color: var(--fieldops-slate-dark);
+}
+
+.fieldops-status-badge--primary {
+    border-color: var(--fieldops-blue-dark);
+    background: var(--fieldops-blue-light);
+    color: var(--fieldops-blue-strong);
+}
+
+.fieldops-status-badge--gray {
+    border-color: var(--fieldops-slate);
+    background: var(--fieldops-slate-light);
+    color: var(--fieldops-slate-dark);
+}
+
+.fieldops-status-badge--blue {
+    border-color: var(--fieldops-blue-dark);
+    background: var(--fieldops-blue-light);
+    color: var(--fieldops-blue-strong);
+}
+
+.fieldops-status-badge--purple {
+    border-color: var(--fieldops-purple-dark);
+    background: var(--fieldops-purple-light);
+    color: var(--fieldops-purple-dark);
+}
+
+.fieldops-status-badge--orange {
+    border-color: var(--fieldops-warning-dark);
+    background: var(--fieldops-warning-light);
+    color: var(--fieldops-warning-dark);
+}
+
+.fieldops-status-badge--green {
+    border-color: var(--fieldops-success);
+    background: var(--fieldops-success-light);
+    color: var(--fieldops-success-dark);
+}
+
+.fieldops-status-badge--red {
+    border-color: var(--fieldops-danger);
+    background: var(--fieldops-danger-light);
+    color: var(--fieldops-danger-dark);
+}
+
+.fieldops-status-badge--magenta {
+    border-color: var(--fieldops-magenta-dark);
+    background: var(--fieldops-magenta-light);
+    color: var(--fieldops-magenta-dark);
+}
+
+.fieldops-fab {
+    border: 2px solid var(--fieldops-blue-dark);
+    background: var(--fieldops-blue-dark);
+    color: var(--fieldops-white);
+    box-shadow: 0 8px 22px rgb(8 19 46 / 18%);
+}
+
+.fieldops-fab:hover {
+    background: var(--fieldops-navy);
+    color: var(--fieldops-white);
+}
+
+.fieldops-fab:focus-visible {
+    outline: 3px solid var(--fieldops-navy);
+    outline-offset: 3px;
+}
+
+.fieldops-basic-profile-link {
+    display: inline-flex;
+    min-height: 2.75rem;
+    flex: 0 0 auto;
+    align-items: center;
+    border-radius: 0.5rem;
+    padding: 0.4675rem 0.6375rem;
+    color: var(--fieldops-white);
+    font-size: 0.74375rem;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.fieldops-basic-profile-link:hover {
+    background: rgb(255 255 255 / 8%);
+    color: var(--fieldops-white);
+}
+
+.fieldops-logout-action {
+    position: fixed;
+    z-index: 40;
+    bottom: 1rem;
+    left: 1rem;
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: rgb(255 255 255 / 90%);
+    padding: 0.3rem 0.75rem;
+    color: var(--fieldops-archive);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-decoration: none;
+    box-shadow: 0 3px 12px rgb(8 19 46 / 10%);
+    transition:
+        border-color 150ms ease,
+        background-color 150ms ease,
+        color 150ms ease;
+}
+
+.fieldops-logout-action:hover {
+    border-color: rgb(220 38 38 / 35%);
+    background: var(--fieldops-white);
+    color: var(--fieldops-danger);
+}
+
+.fieldops-mobile-menu-button,
+.fieldops-mobile-nav {
+    display: none;
+}
+
+.fieldops-sync-status-trigger,
+.fieldops-sync-status-placeholder {
+    position: relative;
+    display: inline-flex;
+    width: 3rem;
+    height: 3rem;
+    flex: 0 0 3rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    color: var(--fieldops-archive);
+    text-decoration: none;
+}
+
+.fieldops-sync-status-trigger:hover {
+    background: rgb(255 255 255 / 10%);
+}
+
+.fieldops-sync-status-trigger:focus-visible {
+    outline: 3px solid var(--fieldops-orange);
+    outline-offset: 2px;
+}
+
+.fieldops-sync-status-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.fieldops-sync-status-dot {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.35rem;
+    width: 0.55rem;
+    height: 0.55rem;
+    border: 1px solid var(--fieldops-navy);
+    border-radius: 9999px;
+    background: var(--fieldops-archive);
+}
+
+.fieldops-sync-status-trigger--healthy {
+    color: var(--fieldops-success);
+}
+
+.fieldops-sync-status-trigger--healthy .fieldops-sync-status-dot {
+    background: var(--fieldops-success);
+}
+
+.fieldops-sync-status-trigger--warning {
+    color: var(--fieldops-warning);
+}
+
+.fieldops-sync-status-trigger--warning .fieldops-sync-status-dot {
+    background: var(--fieldops-warning);
+}
+
+.fieldops-sync-status-trigger--error {
+    color: var(--fieldops-danger);
+}
+
+.fieldops-sync-status-trigger--error .fieldops-sync-status-dot {
+    background: var(--fieldops-danger);
+}
+
+.fieldops-sync-status-placeholder {
+    color: var(--fieldops-archive);
+    opacity: 0.75;
+}
+
+.fieldops-sync-health-indicator {
+    display: grid;
+    width: 3.25rem;
+    height: 3.25rem;
+    place-items: center;
+    border: 1px solid currentColor;
+    border-radius: 9999px;
+}
+
+.fieldops-sync-health-indicator--healthy {
+    background: var(--fieldops-success-light);
+    color: var(--fieldops-success-dark);
+}
+
+.fieldops-sync-health-indicator--warning {
+    background: var(--fieldops-warning-light);
+    color: var(--fieldops-warning-dark);
+}
+
+.fieldops-sync-health-indicator--error {
+    background: var(--fieldops-warning-light);
+    color: var(--fieldops-warning-dark);
+}
+
+.fieldops-page-header-inner {
+    display: flex;
+    width: min(100%, 120rem);
+    min-height: 3.5rem;
+    align-items: center;
+    margin-inline: auto;
+    padding: 0 clamp(1rem, 2.5vw, 2rem);
+}
+
+.fieldops-page-title {
+    margin: 0;
+    color: var(--fieldops-navy);
+    font-family: var(--font-brand);
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+}
+
+@media (max-width: 1050px) {
+    .fieldops-basic-profile-link {
+        display: none;
+    }
+
+    .fieldops-topbar-inner {
+        min-height: 4.0375rem;
+    }
+
+    .fieldops-topbar-actions {
+        gap: 0.35rem;
+    }
+
+    .fieldops-header-search-shell {
+        width: auto;
+        flex-basis: auto;
+    }
+
+    .fieldops-global-search--expanded {
+        width: min(24rem, calc(50vw - 6rem));
+    }
+
+    .fieldops-mobile-menu-button {
+        display: inline-flex;
+        width: 2.75rem;
+        height: 2.75rem;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        margin-left: auto;
+        border: 1px solid rgb(255 255 255 / 20%);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--fieldops-white);
+    }
+
+    .fieldops-mobile-menu-button:hover {
+        background: rgb(255 255 255 / 8%);
+    }
+
+    .fieldops-mobile-menu-button svg {
+        width: 1.275rem;
+        height: 1.275rem;
+    }
+
+    .fieldops-mobile-nav {
+        display: grid;
+        gap: 0.35rem;
+        border-top: 1px solid rgb(255 255 255 / 12%);
+        padding: 0.75rem 1rem 1rem;
+    }
+
+    .fieldops-mobile-nav-link {
+        display: flex;
+        min-height: 2.75rem;
+        align-items: center;
+        border-radius: 0.5rem;
+        padding: 0.55rem 0.75rem;
+        color: #e9eef7;
+        font-weight: 700;
+        text-decoration: none;
+    }
+
+    .fieldops-mobile-nav-link:hover,
+    .fieldops-mobile-nav-link--active {
+        background: #26344c;
+        color: var(--fieldops-white);
+    }
+
+    .fieldops-mobile-user {
+        border-top: 1px solid rgb(255 255 255 / 12%);
+        margin-top: 0.4rem;
+        padding: 0.8rem 0.75rem 0;
+    }
+
+    .fieldops-mobile-user-name {
+        color: var(--fieldops-white);
+        font-weight: 700;
+    }
+
+    .fieldops-mobile-user-email {
+        color: #b6c2d5;
+        font-size: 0.8rem;
+    }
+    }
+
+@media (max-width: 480px) {
+    .fieldops-topbar-inner {
+        gap: 0.35rem;
+        padding-inline: 0.6375rem;
+    }
+
+    .fieldops-app-logo {
+        gap: 0.2975rem;
+        font-size: 0.8075rem;
+    }
+
+    .fieldops-app-logo img {
+        width: 2.465rem;
+        height: 2.465rem;
+    }
+
+    .fieldops-schedule-link {
+        height: 2.75rem;
+        min-height: 2.75rem;
+        padding-inline: 0.595rem;
+    }
+
+    .fieldops-schedule-copy small {
+        display: none;
+    }
+
+    .fieldops-admin-tabs {
+        min-height: 3.1025rem;
+        gap: 0.2975rem;
+        padding-inline: 0.6375rem;
+    }
+
+    .fieldops-admin-tab {
+        padding-inline: 0.7225rem;
+    }
+
+}
+
+@media (max-width: 640px) {
+    .fieldops-calendar {
+        padding: 0.5rem;
+    }
+
+    .fieldops-topbar-inner {
+        gap: 0.25rem;
+    }
+
+    .fieldops-topbar-actions {
+        gap: 0.3rem;
+    }
+
+    .fieldops-header-search-shell {
+        width: 2.75rem;
+        height: 2.75rem;
+        flex: 0 0 2.75rem;
+    }
+
+    .fieldops-global-search__toggle,
+    .fieldops-sync-status-trigger,
+    .fieldops-sync-status-placeholder {
+        width: 2.75rem;
+        height: 2.75rem;
+        flex-basis: 2.75rem;
+    }
+
+    .fieldops-global-search {
+        position: absolute;
+        top: 50%;
+        right: 0;
+        width: 2.75rem;
+        transform: translateY(-50%);
+        transition: width 160ms ease;
+    }
+
+    .fieldops-global-search--expanded {
+        width: min(18rem, calc(100vw - 8rem));
+        min-width: 0;
+    }
+
+    .fieldops-global-search__input {
+        min-height: 2.75rem;
+        padding-left: 2.3rem;
+    }
+
+    .fieldops-global-search__icon {
+        left: 0.72rem;
+        width: 0.95rem;
+        height: 0.95rem;
+    }
+
+    .fieldops-app-shell--admin .fieldops-main {
+        padding-right: 3.5rem;
+    }
+
+    .fieldops-app-shell--admin .fieldops-page-header-inner {
+        padding-right: calc(clamp(1rem, 2.5vw, 2rem) + 3.5rem);
+    }
+
+    .fieldops-app-shell--admin .fieldops-operations-subnav {
+        padding-right: calc(clamp(1rem, 2.5vw, 2rem) + 3.5rem);
+        justify-content: flex-start;
+    }
+
+    .fieldops-admin-tabs-shell {
+        position: fixed;
+        z-index: 60;
+        top: 8.25rem;
+        right: 0;
+        bottom: 1rem;
+        width: 3.5rem;
+        overflow: hidden;
+        border-bottom: 0;
+    }
+
+    .fieldops-admin-tabs {
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        gap: 0.25rem;
+        overflow-x: hidden;
+        overflow-y: auto;
+        margin: 0;
+        padding: 0.35rem 0 0.35rem 0.35rem;
+    }
+
+    .fieldops-admin-tab {
+        width: calc(85% - 0.3rem);
+        min-width: 2.75rem;
+        align-self: flex-end;
+        height: auto;
+        min-height: 2.7625rem;
+        flex: 1 0 2.7625rem;
+        flex-direction: column;
+        gap: 0;
+        border-radius: 0.7rem 0 0 0.7rem;
+        padding: 0.34rem 0.1275rem;
+    }
+
+    .fieldops-admin-tab--active,
+    .fieldops-admin-tab--active:hover {
+        height: auto;
+        min-height: 3.06rem;
+        flex: 1.2 0 3.06rem;
+        border-radius: 0.8rem 0 0 0.8rem;
+    }
+
+    .fieldops-admin-tab-icon {
+        width: 1.1475rem;
+        height: 1.1475rem;
+    }
+
+    .fieldops-logout-action {
+        position: static;
+        width: fit-content;
+        margin: 0.75rem 1rem calc(1rem + env(safe-area-inset-bottom));
+    }
+
+    .fieldops-admin-tab-label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
+    }
+
+    .fieldops-app-shell--calendar .fieldops-admin-tabs-shell {
+        bottom: 5rem;
+    }
+}
+
+}
+
+/* Operational controls stay easy to hit even when local utility classes vary. */
+select:not([multiple]) {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='m6 8 4 4 4-4' stroke='%2364758B' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.6'/%3E%3C/svg%3E");
+    background-position: right 0.75rem center;
+    background-repeat: no-repeat;
+    background-size: 0.9rem;
+    padding-right: 2.25rem;
+}
+
+@media (forced-colors: active) {
+    select:not([multiple]) {
+        appearance: auto;
+        background-image: none;
+        padding-right: 0.75rem;
+    }
+}
+
+.fieldops-brand-link,
+.fieldops-schedule-link,
+.fieldops-mobile-menu-button,
+.fieldops-global-search__toggle,
+.fieldops-global-search__clear,
+.fieldops-sync-status-trigger,
+.fieldops-basic-profile-link,
+.fieldops-admin-tab,
+.fieldops-operations-subnav-link,
+.fieldops-primary-link,
+.fieldops-button,
+.fieldops-client-input,
+.fieldops-submit-action,
+.fieldops-secondary-action,
+.fieldops-delete-action {
+    min-height: 44px;
+}
+
+.fieldops-brand-link,
+.fieldops-global-search__toggle,
+.fieldops-global-search__clear,
+.fieldops-sync-status-trigger,
+.fieldops-mobile-menu-button,
+.fieldops-secondary-action.h-10.w-10,
+.fieldops-submit-action.fieldops-directory-search-button--icon {
+    min-width: 44px;
+}
+
+    .fieldops-workspace-field input,
+    .fieldops-workspace-field select,
+    .fieldops-workspace-field textarea,
+    .fieldops-client-input {
+        min-height: 44px;
+        border-color: var(--fieldops-border-strong);
+        border-radius: 8px;
+    }
+
+@media (prefers-reduced-motion: reduce) {
+    #app {
+        transition: none;
+    }
+
+    #app.fieldops-navigating {
+        opacity: 1;
+        transform: none;
+    }
+
+    .fieldops-calendar,
+    .fieldops-admin-tab,
+    .calendar-header,
+    .calendar-view-controls,
+    .calendar-navigation,
+    .calendar-content {
+        transition: none;
+    }
+}
+
+@media (pointer: fine) {
+    .fieldops-client-input:not(textarea),
+    .fieldops-form-input,
+    .fieldops-workspace-field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+    .fieldops-workspace-field select,
+    .fieldops-clearable-search__input {
+        min-height: 2rem;
+        padding-top: 0.25rem;
+        padding-bottom: 0.25rem;
+    }
+
+    .fieldops-client-input.fieldops-directory-search-input {
+        min-height: 2.25rem;
+        padding-top: 0.4rem;
+        padding-bottom: 0.4rem;
+    }
+
+}

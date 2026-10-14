@@ -1,0 +1,21 @@
+[Unit]
+Description=FieldOps database queue worker
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=%h/code/fieldops
+ExecStart=%h/.config/herd-lite/bin/php artisan queue:work database --queue=default,quickbooks-sync,quickbooks-initial-import --sleep=1 --tries=3 --timeout=120 --max-time=3600 --name=fieldops-queue-worker
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=180
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

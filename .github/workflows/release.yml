@@ -1,0 +1,148 @@
+---
+name: CI and release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Validate, build, and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          extensions: gd, intl, mbstring, pcntl, pdo_pgsql, pdo_sqlite, zip
+          coverage: none
+          tools: composer:v2
+
+      - name: Validate Composer metadata
+        run: composer validate --strict
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Type-check and build frontend
+        run: npm run build
+
+      - name: Run PHPUnit suite
+        env:
+          APP_KEY: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        run: php -d memory_limit=-1 ./vendor/bin/phpunit
+
+  container-build:
+    name: Build production container targets (no publish)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build PHP-FPM application image
+        run: docker build --file docker/php/Dockerfile --tag fieldops-public-app:ci .
+
+      - name: Build Nginx web image
+        run: |
+          docker build \
+            --file docker/nginx/Dockerfile \
+            --build-arg APP_IMAGE=fieldops-public-app:ci \
+            --tag fieldops-public-web:ci \
+            .
+
+  release:
+    name: Publish release images
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [quality, container-build]
+    permissions:
+      contents: write
+      packages: write
+    concurrency:
+      group: fieldops-public-release-${{ github.ref_name }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require a version tag on main history
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$ ]]
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
+
+      - name: Resolve lowercase GHCR namespace
+        id: registry
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: echo "namespace=ghcr.io/${REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Publish PHP-FPM application image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/php/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.registry.outputs.namespace }}/fieldops-public-app:${{ github.ref_name }}
+            ${{ steps.registry.outputs.namespace }}/fieldops-public-app:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+
+      - name: Publish Nginx web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/nginx/Dockerfile
+          build-args: >-
+            APP_IMAGE=${{ steps.registry.outputs.namespace }}/fieldops-public-app:${{ github.ref_name }}
+          push: true
+          tags: |
+            ${{ steps.registry.outputs.namespace }}/fieldops-public-web:${{ github.ref_name }}
+            ${{ steps.registry.outputs.namespace }}/fieldops-public-web:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: FieldOps ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false

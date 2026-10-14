@@ -1,0 +1,33 @@
+# Local customer data and credentials must never enter a build context.
+reference/
+reference/**
+.env
+.env.*
+auth.json
+*.pem
+*.p12
+*.pfx
+*.key
+
+# Repository, dependency, editor, and generated state.
+.git/
+.github/
+.vscode/
+.idea/
+.mcp.json
+.opencode/
+.claude/
+.agents/
+.phpunit.result.cache
+node_modules/
+vendor/
+public/build/
+public/hot
+storage/
+bootstrap/cache/*.php
+docker/bws-helper/target/
+
+# Tests and docs are not required in runtime build contexts.
+tests/
+database/factories/
+docs/

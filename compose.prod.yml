@@ -1,0 +1,84 @@
+x-app: &app
+  image: ${FIELDOPS_APP_IMAGE:?Set FIELDOPS_APP_IMAGE to a release image}
+  env_file:
+    - ${FIELDOPS_ENV_FILE:?Set FIELDOPS_ENV_FILE}
+  environment: &app-environment
+    APP_ENV: production
+    APP_DEBUG: "false"
+    LOG_CHANNEL: stderr
+    DB_CONNECTION: pgsql
+    QUEUE_CONNECTION: database
+    DB_QUEUE: default
+    DB_QUEUE_RETRY_AFTER: "180"
+    CACHE_STORE: database
+    SESSION_DRIVER: database
+    DB_SSLMODE: verify-full
+    PGSSLROOTCERT: /run/secrets/postgres-ca.pem
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+    - /var/www/html/bootstrap/cache:rw,noexec,nosuid,size=16m,uid=82,gid=82,mode=0770
+    - /var/www/html/storage/framework:rw,noexec,nosuid,size=32m,uid=82,gid=82,mode=0770
+  volumes:
+    - fieldops-private:/var/www/html/storage/app/private
+    - ${FIELDOPS_PG_CA_FILE:?Set FIELDOPS_PG_CA_FILE}:/run/secrets/postgres-ca.pem:ro
+  networks:
+    - fieldops
+  restart: unless-stopped
+  init: true
+
+services:
+  app:
+    <<: *app
+    expose:
+      - "9000"
+    healthcheck:
+      test: ["CMD", "php", "-r", "$$socket = @fsockopen('127.0.0.1', 9000); exit($$socket === false ? 1 : 0);"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  web:
+    image: ${FIELDOPS_WEB_IMAGE:?Set FIELDOPS_WEB_IMAGE to a release image}
+    ports:
+      - "${FIELDOPS_HTTP_BIND:-127.0.0.1:8080}:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+      - /var/cache/nginx:rw,noexec,nosuid,size=32m,uid=101,gid=101,mode=0750
+      - /var/run:rw,noexec,nosuid,size=8m,uid=101,gid=101,mode=0750
+    networks:
+      - fieldops
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/up"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  worker:
+    <<: *app
+    command: php artisan queue:work database --queue=default,quickbooks-sync,quickbooks-initial-import --sleep=1 --tries=3 --timeout=120 --max-time=3600
+    depends_on:
+      app:
+        condition: service_healthy
+    stop_grace_period: 3m
+
+  scheduler:
+    <<: *app
+    command: php artisan schedule:work
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  fieldops-private:
+
+networks:
+  fieldops:
