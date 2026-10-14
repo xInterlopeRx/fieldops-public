@@ -92,6 +92,53 @@ jobs:
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$SOURCE_SHA" origin/main
 
+      - name: Refuse existing public releases and image tags
+        uses: actions/github-script@v7
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          SOURCE_SHA: ${{ github.sha }}
+        with:
+          script: |
+            const { RELEASE_TAG: tag, SOURCE_SHA: sourceSha } = process.env;
+
+            try {
+              await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              core.setFailed(`A GitHub Release already exists for ${tag}; refusing to replace it.`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            async function packageHasTag(packageName, imageTag) {
+              let versions;
+              try {
+                versions = await github.paginate(
+                  "GET /users/{username}/packages/container/{package_name}/versions",
+                  {
+                    username: context.repo.owner,
+                    package_name: packageName,
+                    per_page: 100,
+                  },
+                );
+              } catch (error) {
+                if (error.status === 404) return false;
+                throw error;
+              }
+
+              return versions.some((version) =>
+                version.metadata?.container?.tags?.includes(imageTag),
+              );
+            }
+
+            for (const packageName of ["fieldops-public-app", "fieldops-public-web"]) {
+              for (const imageTag of [tag, `sha-${sourceSha}`]) {
+                if (await packageHasTag(packageName, imageTag)) {
+                  core.setFailed(`Image tag ${packageName}:${imageTag} already exists; refusing to overwrite it.`);
+                  return;
+                }
+              }
+            }
+
       - name: Resolve lowercase GHCR namespace
         id: registry
         env:
