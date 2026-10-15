@@ -55,6 +55,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate production Compose configuration
+        env:
+          FIELDOPS_VERSION: ci
+          FIELDOPS_ENV_FILE: /dev/null
+          FIELDOPS_PG_CA_FILE: /dev/null
+        run: |
+          docker compose -f compose.prod.yml config --quiet
+          images="$(docker compose -f compose.prod.yml config --images)"
+          grep -Fqx 'ghcr.io/xinterloperx/fieldops-public-app:ci' <<< "$images"
+          grep -Fqx 'ghcr.io/xinterloperx/fieldops-public-web:ci' <<< "$images"
+
       - name: Build PHP-FPM application image
         run: docker build --file docker/php/Dockerfile --tag fieldops-public-app:ci .
 

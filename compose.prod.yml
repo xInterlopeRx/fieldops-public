@@ -1,7 +1,7 @@
 x-app: &app
-  image: ${FIELDOPS_APP_IMAGE:?Set FIELDOPS_APP_IMAGE to a release image}
+  image: ghcr.io/xinterloperx/fieldops-public-app:${FIELDOPS_VERSION:?Set FIELDOPS_VERSION to a published version tag}
   env_file:
-    - ${FIELDOPS_ENV_FILE:?Set FIELDOPS_ENV_FILE}
+    - ${FIELDOPS_ENV_FILE:?Set FIELDOPS_ENV_FILE to an absolute protected environment-file path}
   environment: &app-environment
     APP_ENV: production
     APP_DEBUG: "false"
@@ -18,10 +18,12 @@ x-app: &app
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=64m,mode=1777
     - /var/www/html/bootstrap/cache:rw,noexec,nosuid,size=16m,uid=82,gid=82,mode=0770
-    - /var/www/html/storage/framework:rw,noexec,nosuid,size=32m,uid=82,gid=82,mode=0770
+    - /var/www/html/storage/framework/cache/data:rw,noexec,nosuid,size=8m,uid=82,gid=82,mode=0770
+    - /var/www/html/storage/framework/sessions:rw,noexec,nosuid,size=8m,uid=82,gid=82,mode=0770
+    - /var/www/html/storage/framework/views:rw,noexec,nosuid,size=16m,uid=82,gid=82,mode=0770
   volumes:
     - fieldops-private:/var/www/html/storage/app/private
-    - ${FIELDOPS_PG_CA_FILE:?Set FIELDOPS_PG_CA_FILE}:/run/secrets/postgres-ca.pem:ro
+    - ${FIELDOPS_PG_CA_FILE:?Set FIELDOPS_PG_CA_FILE to the PostgreSQL TLS CA bundle}:/run/secrets/postgres-ca.pem:ro
   networks:
     - fieldops
   restart: unless-stopped
@@ -40,7 +42,7 @@ services:
       retries: 3
 
   web:
-    image: ${FIELDOPS_WEB_IMAGE:?Set FIELDOPS_WEB_IMAGE to a release image}
+    image: ghcr.io/xinterloperx/fieldops-public-web:${FIELDOPS_VERSION:?Set FIELDOPS_VERSION to a published version tag}
     ports:
       - "${FIELDOPS_HTTP_BIND:-127.0.0.1:8080}:80"
     depends_on:
@@ -69,6 +71,8 @@ services:
       app:
         condition: service_healthy
     stop_grace_period: 3m
+    healthcheck:
+      disable: true
 
   scheduler:
     <<: *app
@@ -76,6 +80,8 @@ services:
     depends_on:
       app:
         condition: service_healthy
+    healthcheck:
+      disable: true
 
 volumes:
   fieldops-private:
