@@ -59,12 +59,15 @@ FROM php-extensions AS production
 WORKDIR /var/www/html
 COPY --from=composer-build --chown=www-data:www-data /var/www/html/ /var/www/html/
 COPY --from=frontend-build --chown=www-data:www-data /var/www/html/public/build/ /var/www/html/public/build/
+COPY --chmod=0555 docker/php/entrypoint.sh /usr/local/bin/fieldops-entrypoint
 RUN rm -f public/hot \
     && mkdir -p storage/app/private storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache
 
 ENV APP_ENV=production APP_DEBUG=false
 USER www-data
+ENTRYPOINT ["/usr/local/bin/fieldops-entrypoint"]
+CMD ["php-fpm"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD php -r '$socket = @fsockopen("127.0.0.1", 9000); exit($socket === false ? 1 : 0);'
