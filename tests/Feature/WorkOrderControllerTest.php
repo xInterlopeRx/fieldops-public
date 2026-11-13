@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Enums\TimeEntryActivityType;
+use App\Models\ApplicationSetupState;
+use App\Models\Contact;
 use App\Models\Customer;
 use App\Models\Project;
 use App\Models\SharePointAttachment;
@@ -172,6 +174,124 @@ class WorkOrderControllerTest extends TestCase
         $this->assertSame('pending', $visit->graph_sync_status);
         Notification::assertSentTo($user, BusinessAssignmentChanged::class, fn (BusinessAssignmentChanged $notification): bool => $notification->change === 'assigned');
         Notification::assertSentTo($admin, BusinessAssignmentChanged::class, fn (BusinessAssignmentChanged $notification): bool => $notification->change === 'assigned');
+    }
+
+    public function test_json_job_creation_returns_the_created_job_for_an_in_page_form(): void
+    {
+        Notification::fake();
+        $user = User::factory()->create(['status' => 'active']);
+        $customer = Customer::create(['name' => 'In-page Job Client']);
+        $site = $customer->sites()->create(['name' => 'In-page Job Site']);
+        $project = Project::create([
+            'customer_id' => $customer->getKey(),
+            'name' => 'In-page Job Project',
+            'project_number' => 'IPJ-001',
+        ]);
+        $project->sites()->attach($site->getKey());
+
+        $this->actingAs($user)
+            ->postJson(route('work-orders.store'), [
+                'title' => 'Created in Jobs tab',
+                'scope' => 'Inspect the equipment.',
+                'status' => 'created',
+                'customer_id' => $customer->getKey(),
+                'site_id' => $site->getKey(),
+                'project_id' => $project->getKey(),
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.title', 'Created in Jobs tab')
+            ->assertJsonPath('data.status', 'created')
+            ->assertJsonPath('data.customerId', $customer->getKey())
+            ->assertJsonPath('data.siteId', $site->getKey())
+            ->assertJsonPath('data.projectId', $project->getKey());
+
+        $this->assertDatabaseHas('work_orders', [
+            'title' => 'Created in Jobs tab',
+            'site_id' => $site->getKey(),
+            'project_id' => $project->getKey(),
+        ]);
+    }
+
+    public function test_job_project_link_must_belong_to_the_selected_client_and_site(): void
+    {
+        Notification::fake();
+        $user = User::factory()->create(['status' => 'active']);
+        $customer = Customer::create(['name' => 'Project Job Client']);
+        $linkedSite = $customer->sites()->create(['name' => 'Linked Project Site']);
+        $otherSite = $customer->sites()->create(['name' => 'Unlinked Client Site']);
+        $otherCustomer = Customer::create(['name' => 'Different Project Client']);
+        $otherCustomerSite = $otherCustomer->sites()->create(['name' => 'Different Client Site']);
+        $project = Project::create([
+            'customer_id' => $customer->getKey(),
+            'project_number' => 'PJ-VALIDATION-1',
+            'name' => 'Scoped Project',
+        ]);
+        $project->sites()->attach($linkedSite->getKey());
+
+        $this->actingAs($user)
+            ->postJson(route('work-orders.store'), [
+                'title' => 'Wrong Client Project Job',
+                'scope' => 'Inspect the equipment.',
+                'status' => 'created',
+                'customer_id' => $otherCustomer->getKey(),
+                'site_id' => $otherCustomerSite->getKey(),
+                'project_id' => $project->getKey(),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('project_id');
+
+        $this->actingAs($user)
+            ->postJson(route('work-orders.store'), [
+                'title' => 'Unlinked Project Site Job',
+                'scope' => 'Inspect the equipment.',
+                'status' => 'created',
+                'customer_id' => $customer->getKey(),
+                'site_id' => $otherSite->getKey(),
+                'project_id' => $project->getKey(),
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('site_id');
+
+        $this->assertDatabaseMissing('work_orders', ['title' => 'Wrong Client Project Job']);
+        $this->assertDatabaseMissing('work_orders', ['title' => 'Unlinked Project Site Job']);
+    }
+
+    public function test_new_job_saves_the_selected_site_contact_snapshot(): void
+    {
+        Notification::fake();
+        $user = User::factory()->create(['status' => 'active']);
+        $customer = Customer::create(['name' => 'Site contact customer']);
+        $site = $customer->sites()->create(['name' => 'Contact site']);
+        $contact = Contact::create([
+            'customer_id' => $customer->getKey(),
+            'site_id' => null,
+            'contact_type' => 'primary',
+            'first_name' => 'Jordan',
+            'last_name' => 'Rivera',
+            'email' => 'jordan@example.test',
+            'phone' => '555-0134',
+        ]);
+        $site->update(['primary_contact_id' => $contact->getKey()]);
+
+        $this->actingAs($user)
+            ->from('/calendar')
+            ->post(route('work-orders.store'), [
+                'title' => 'Site contact job',
+                'scope' => 'Inspect the site equipment.',
+                'status' => 'created',
+                'customer_id' => $customer->getKey(),
+                'site_id' => $site->getKey(),
+                'client_contact_id' => $contact->getKey(),
+            ])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('calendar'));
+
+        $workOrder = WorkOrder::query()->where('title', 'Site contact job')->sole();
+
+        $this->assertSame($contact->getKey(), $workOrder->client_contact_id);
+        $this->assertSame('Jordan Rivera', $workOrder->client_contact_name);
+        $this->assertSame('jordan@example.test', $workOrder->client_contact_email);
+        $this->assertSame('555-0134', $workOrder->client_contact_phone);
     }
 
     public function test_created_job_can_exist_without_a_visit_then_schedule_with_client_and_staff_emails(): void
@@ -633,7 +753,7 @@ class WorkOrderControllerTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Type', 'application/pdf');
         $this->get($remote['url'])
-            ->assertRedirect('https://example.sharepoint.com/sites/work-schedules/job-item-1');
+            ->assertRedirect('https://tenant.sharepoint.com/sites/work-schedules/job-item-1');
     }
 
     private function createAssignedVisit(User $user, int $durationMinutes): Visit
@@ -674,15 +794,17 @@ class WorkOrderControllerTest extends TestCase
 
     private function mockSharePointUpload(): void
     {
+        ApplicationSetupState::query()->whereKey(1)->update(['onboarding_required' => false]);
         config([
             'services.microsoft_graph.sharepoint_enabled' => true,
+            'services.microsoft_graph.work_schedules.site_id' => 'site-test',
             'services.microsoft_graph.work_schedules.drive_id' => 'drive-test',
         ]);
 
         $this->mock(MicrosoftGraphSharePointStorageService::class)
-            ->shouldReceive('upload')
+            ->shouldReceive('uploadToTarget')
             ->once()
-            ->andReturnUsing(fn (string $path, string $contents, string $contentType): array => [
+            ->andReturnUsing(fn (string $siteId, string $driveId, string $path, string $contents, string $contentType): array => [
                 'id' => 'job-item-1',
                 'name' => basename($path),
                 'size' => strlen($contents),
@@ -690,7 +812,7 @@ class WorkOrderControllerTest extends TestCase
                 'e_tag' => 'etag-job-item-1',
                 'c_tag' => null,
                 'last_modified_at' => null,
-                'sharepoint_url' => 'https://example.sharepoint.com/sites/work-schedules/job-item-1',
+                'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work-schedules/job-item-1',
             ]);
     }
 

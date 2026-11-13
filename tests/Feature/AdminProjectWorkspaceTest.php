@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ApplicationSetupState;
 use App\Models\Customer;
 use App\Models\Project;
 use App\Models\ProjectAttachment;
@@ -203,7 +204,7 @@ class AdminProjectWorkspaceTest extends TestCase
             ->assertHeader('Content-Type', 'application/pdf');
 
         $this->get(route('attachments.open', $sharePointAttachment))
-            ->assertRedirect('https://example.sharepoint.com/sites/work-schedules/project-item-1');
+            ->assertRedirect('https://tenant.sharepoint.com/sites/work-schedules/project-item-1');
     }
 
     public function test_admin_can_upload_powerpoint_and_receive_the_microsoft_365_open_capability(): void
@@ -266,15 +267,17 @@ class AdminProjectWorkspaceTest extends TestCase
 
     private function mockSharePointUpload(): void
     {
+        ApplicationSetupState::query()->whereKey(1)->update(['onboarding_required' => false]);
         config([
             'services.microsoft_graph.sharepoint_enabled' => true,
+            'services.microsoft_graph.work_schedules.site_id' => 'site-test',
             'services.microsoft_graph.work_schedules.drive_id' => 'drive-test',
         ]);
 
         $this->mock(MicrosoftGraphSharePointStorageService::class)
-            ->shouldReceive('upload')
+            ->shouldReceive('uploadToTarget')
             ->once()
-            ->andReturnUsing(fn (string $path, string $contents, string $contentType): array => [
+            ->andReturnUsing(fn (string $siteId, string $driveId, string $path, string $contents, string $contentType): array => [
                 'id' => 'project-item-1',
                 'name' => basename($path),
                 'size' => strlen($contents),
@@ -282,7 +285,7 @@ class AdminProjectWorkspaceTest extends TestCase
                 'e_tag' => 'etag-project-item-1',
                 'c_tag' => null,
                 'last_modified_at' => null,
-                'sharepoint_url' => 'https://example.sharepoint.com/sites/work-schedules/project-item-1',
+                'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work-schedules/project-item-1',
             ]);
     }
 

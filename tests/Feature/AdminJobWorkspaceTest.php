@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\TimeEntryActivityType;
+use App\Models\ApplicationSetupState;
 use App\Models\Contact;
 use App\Models\Customer;
 use App\Models\SharePointAttachment;
@@ -61,7 +62,7 @@ class AdminJobWorkspaceTest extends TestCase
             'file_size' => 22,
             'sharepoint_drive_id' => 'drive-admin-job',
             'sharepoint_item_id' => 'item-admin-job',
-            'sharepoint_url' => 'https://example.sharepoint.com/sites/work-schedules/item-admin-job',
+            'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work-schedules/item-admin-job',
         ]);
 
         $response = $this->getJson(route('admin.jobs.workspace.show', $job))
@@ -99,15 +100,19 @@ class AdminJobWorkspaceTest extends TestCase
         $admin = $this->admin();
         [$customer, $site, $job] = $this->jobFixture();
         Notification::fake();
+        ApplicationSetupState::query()->whereKey(1)->update(['onboarding_required' => false]);
         config([
             'services.microsoft_graph.sharepoint_enabled' => true,
+            'services.microsoft_graph.work_schedules.site_id' => 'site-test',
             'services.microsoft_graph.work_schedules.drive_id' => 'drive-test',
         ]);
         $uploadIndex = 0;
         $this->mock(MicrosoftGraphSharePointStorageService::class)
-            ->shouldReceive('upload')
+            ->shouldReceive('uploadToTarget')
             ->twice()
-            ->withArgs(function (string $path, string $contents, string $contentType) use ($customer): bool {
+            ->withArgs(function (string $siteId, string $driveId, string $path, string $contents, string $contentType) use ($customer): bool {
+                $this->assertSame('site-test', $siteId);
+                $this->assertSame('drive-test', $driveId);
                 $this->assertMatchesRegularExpression(
                     '/\AFieldOps\/customer-'.$customer->getKey().'\/[0-9a-f-]{36}\.[a-z0-9]{1,12}\z/',
                     $path,
@@ -115,7 +120,7 @@ class AdminJobWorkspaceTest extends TestCase
 
                 return true;
             })
-            ->andReturnUsing(function (string $path, string $contents, string $contentType) use (&$uploadIndex): array {
+            ->andReturnUsing(function (string $siteId, string $driveId, string $path, string $contents, string $contentType) use (&$uploadIndex): array {
                 $itemId = 'job-item-'.++$uploadIndex;
 
                 return [
@@ -126,7 +131,7 @@ class AdminJobWorkspaceTest extends TestCase
                     'e_tag' => 'etag-'.$itemId,
                     'c_tag' => null,
                     'last_modified_at' => null,
-                    'sharepoint_url' => 'https://example.sharepoint.com/sites/work-schedules/'.$itemId,
+                    'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work-schedules/'.$itemId,
                 ];
             });
 
@@ -173,17 +178,21 @@ class AdminJobWorkspaceTest extends TestCase
         $admin = $this->admin();
         [, , $job] = $this->jobFixture();
         Notification::fake();
+        ApplicationSetupState::query()->whereKey(1)->update(['onboarding_required' => false]);
         config([
             'services.microsoft_graph.sharepoint_enabled' => true,
+            'services.microsoft_graph.work_schedules.site_id' => 'site-test',
             'services.microsoft_graph.work_schedules.drive_id' => 'drive-test',
         ]);
-        $clientUploadId = \Illuminate\Support\Str::uuid()->toString();
+        $clientUploadId = 'da475981-2251-4508-8ef2-ec02b29d36d3';
 
         $this->mock(MicrosoftGraphSharePointStorageService::class)
-            ->shouldReceive('upload')
+            ->shouldReceive('uploadToTarget')
             ->once()
-            ->withArgs(fn (string $path): bool => str_contains($path, '/'.$clientUploadId.'.pdf'))
-            ->andReturn([
+            ->withArgs(fn (string $siteId, string $driveId, string $path, string $contents, string $contentType): bool => $siteId === 'site-test'
+                && $driveId === 'drive-test'
+                && str_contains($path, '/'.$clientUploadId.'.pdf'))
+            ->andReturnUsing(fn (string $siteId, string $driveId, string $path, string $contents, string $contentType): array => [
                 'id' => 'job-item-idempotent',
                 'name' => $clientUploadId.'.pdf',
                 'size' => 16,
@@ -191,7 +200,7 @@ class AdminJobWorkspaceTest extends TestCase
                 'e_tag' => 'etag-job-item-idempotent',
                 'c_tag' => null,
                 'last_modified_at' => null,
-                'sharepoint_url' => 'https://example.sharepoint.com/sites/work-schedules/job-item-idempotent',
+                'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work-schedules/job-item-idempotent',
             ]);
 
         $payload = [

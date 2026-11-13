@@ -36,6 +36,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\RateLimiter;
@@ -180,7 +181,7 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_first_admin_can_activate_ready_runtime_target_without_enabling_graph_writes(): void
+    public function test_runtime_activation_automatically_enables_business_attachments_after_readiness_when_no_legacy_rows_remain(): void
     {
         [$admin, $target] = $this->configuredAdminAndTarget();
         $target->forceFill([
@@ -200,6 +201,7 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
                 'completed_at' => now(),
             ]);
         $this->createPermissionVerification($target, $admin);
+        $this->createPassedSharePointCanary($target, $admin);
         $customer = Customer::create(['name' => 'Active Visit owner customer']);
         $site = Site::create(['customer_id' => $customer->getKey(), 'name' => 'Active Visit owner site']);
         $workOrder = WorkOrder::create([
@@ -226,7 +228,7 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
             'services.microsoft_graph.writes_enabled' => false,
             'services.microsoft_graph.calendar_writes_enabled' => false,
             'services.microsoft_graph.contacts_sync_enabled' => false,
-            'services.microsoft_graph.sharepoint_enabled' => false,
+            'services.microsoft_graph.sharepoint_enabled' => true,
             'services.microsoft_graph.onboarding_writes_enabled' => false,
         ]);
         Http::preventStrayRequests();
@@ -240,9 +242,12 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
         $this->assertSame($target->client_id, app(MicrosoftGraphRuntimeTargetResolver::class)->clientId());
         $this->assertNotNull($activated->runtime_activated_at);
         $this->assertSame($admin->getKey(), $activated->runtime_activated_by_user_id);
+        $this->assertNotNull($activated->business_attachments_writes_activated_at);
+        $this->assertSame($admin->getKey(), $activated->business_attachments_writes_activated_by_user_id);
         $this->assertFalse(config('services.microsoft_graph.writes_enabled'));
         $this->assertFalse(config('services.microsoft_graph.calendar_writes_enabled'));
         $this->assertFalse(config('services.microsoft_graph.contacts_sync_enabled'));
+        $this->assertDatabaseHas('audit_events', ['event' => 'microsoft_graph_business_attachments_writes_activated']);
         $this->assertDatabaseHas('audit_events', ['event' => 'microsoft_graph_runtime_target_activated']);
         Http::assertNothingSent();
 
@@ -308,6 +313,7 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
             ->assertSessionMissing('_old_input.totp_code');
 
         $this->assertNotNull($target->fresh()->runtime_activated_at);
+        $this->assertNull($target->fresh()->business_attachments_writes_activated_at);
         $this->assertFalse(config('services.microsoft_graph.writes_enabled'));
         $this->assertFalse(config('services.microsoft_graph.calendar_writes_enabled'));
         $this->assertFalse(config('services.microsoft_graph.contacts_sync_enabled'));
@@ -970,7 +976,7 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
         ])->save();
         $permissionVerification = $this->createPermissionVerification($target, $admin);
         $challenge = GraphOnboardingChallenge::query()->create([
-            'id' => \Illuminate\Support\Str::uuid()->toString(),
+            'id' => '00000000-0000-4000-8000-000000000099',
             'environment' => app()->environment(),
             'target_id' => $target->getKey(),
             'user_id' => $admin->getKey(),
@@ -1390,7 +1396,7 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
             'graph.microsoft.com/v1.0/*' => function (HttpRequest $request) use ($target, &$changed) {
                 if (! $changed && str_contains($request->url(), '/users/')) {
                     MicrosoftGraphOnboardingTarget::query()->whereKey($target->getKey())->update([
-                        'non_target_site_id' => 'example.sharepoint.com/replaced-control-site',
+                        'non_target_site_id' => 'byteharder.sharepoint.com/replaced-control-site',
                     ]);
                     $changed = true;
                 }
@@ -1415,7 +1421,7 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
         $this->assertSame('not_checked', $target->non_target_drive_status);
         $this->assertNull($target->boundary_verified_at);
         $this->assertDatabaseHas('audit_events', [
-            'event' => 'microsoft_graph_onboarding_non_target_denial_stale_result_discarded',
+            'event' => 'microsoft_graph_stale_non_target_denial_discarded',
         ]);
         Http::assertSentCount(6);
     }
@@ -2427,11 +2433,11 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
         $this->assertSame(ApplicationSetupStep::STATUS_PASSED, $resolvedGraphStep['status']);
     }
 
-    public function test_another_admin_cannot_create_the_first_admins_calendar_canary(): void
+    public function test_basic_user_cannot_create_the_admins_calendar_canary(): void
     {
         [, $target] = $this->configuredAdminAndTarget();
         $this->readyForCalendarCanary($target);
-        $otherAdmin = User::factory()->admin()->create(['status' => 'active']);
+        $otherAdmin = User::factory()->create(['status' => 'active']);
         $otherSecret = app(Google2FA::class)->generateSecretKey();
         $otherAdmin->forceFill([
             'two_factor_secret' => Fortify::currentEncrypter()->encrypt($otherSecret),
@@ -2480,7 +2486,7 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
         $this->assertModelExists($canary);
 
         try {
-            $target->delete();
+            DB::transaction(fn () => $target->delete());
             $this->fail('A target with canary history must not be deleted.');
         } catch (QueryException) {
             $this->assertModelExists($canary);
@@ -2769,13 +2775,13 @@ class MicrosoftGraphOnboardingTargetTest extends TestCase
             'target_is_dedicated_shared_mailbox' => true,
             'notification_calendar_id' => 'calendar-id_1',
             'work_schedules_group_id' => '00000000-0000-0000-0000-000000000014',
-            'work_schedules_site_id' => 'example.sharepoint.com,sitecollection,webid',
+            'work_schedules_site_id' => 'byteharder.sharepoint.com,sitecollection,webid',
             'work_schedules_drive_id' => 'drive-id_1',
-            'business_attachments_site_id' => 'example.sharepoint.com,businesscollection,businessweb',
+            'business_attachments_site_id' => 'byteharder.sharepoint.com,businesscollection,businessweb',
             'business_attachments_drive_id' => 'business-drive-id_1',
             'non_target_mailbox_email' => 'control@example.test',
             'non_target_is_user_mailbox' => true,
-            'non_target_site_id' => 'example.sharepoint.com,nontargetcollection,nontargetweb',
+            'non_target_site_id' => 'byteharder.sharepoint.com,nontargetcollection,nontargetweb',
             'non_target_drive_id' => 'non-target-drive-id_1',
         ];
     }

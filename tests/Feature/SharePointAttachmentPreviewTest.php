@@ -28,12 +28,12 @@ class SharePointAttachmentPreviewTest extends TestCase
         $storage
             ->shouldReceive('thumbnail')
             ->once()
-            ->with($attachment->sharepoint_item_id)
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id)
             ->andReturn(['contents' => $contents, 'width' => 640, 'height' => 320]);
         $storage
             ->shouldReceive('downloadWithMetadata')
             ->once()
-            ->with($attachment->sharepoint_item_id)
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id)
             ->andReturn($this->download($attachment, $contents, 'image/png'));
 
         $thumbnail = $this->actingAs($admin)
@@ -85,17 +85,17 @@ class SharePointAttachmentPreviewTest extends TestCase
         $storage
             ->shouldReceive('downloadWithMetadata')
             ->once()
-            ->with('item-1')
+            ->with('item-1', $pdfAttachment->sharepoint_drive_id)
             ->andReturn($this->download($pdfAttachment, $pdf, 'application/pdf'));
         $storage
             ->shouldReceive('downloadWithMetadata')
             ->once()
-            ->with('item-preview-text')
+            ->with('item-preview-text', $textAttachment->sharepoint_drive_id)
             ->andReturn($this->download($textAttachment, $notes, 'text/plain'));
         $storage
             ->shouldReceive('downloadWithMetadata')
             ->once()
-            ->with('item-preview-csv')
+            ->with('item-preview-csv', $csvAttachment->sharepoint_drive_id)
             ->andReturn($this->download($csvAttachment, $csv, 'text/csv'));
 
         $this->actingAs($admin)
@@ -149,7 +149,7 @@ class SharePointAttachmentPreviewTest extends TestCase
         $this->mock(MicrosoftGraphSharePointStorageService::class)
             ->shouldReceive('thumbnail')
             ->once()
-            ->with($attachment->sharepoint_item_id)
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id)
             ->andReturn([
                 'contents' => '%PDF-1.4 not a png',
                 'width' => 320,
@@ -174,7 +174,7 @@ class SharePointAttachmentPreviewTest extends TestCase
         $this->mock(MicrosoftGraphSharePointStorageService::class)
             ->shouldReceive('downloadWithMetadata')
             ->once()
-            ->with($attachment->sharepoint_item_id)
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id)
             ->andThrow(new MicrosoftGraphApiException('graph_preview_secret_marker', 502));
 
         $this->actingAs($admin)
@@ -251,7 +251,7 @@ class SharePointAttachmentPreviewTest extends TestCase
             'file_size' => 2048,
             'sharepoint_drive_id' => 'drive-preview',
             'sharepoint_item_id' => 'item-1',
-            'sharepoint_url' => 'https://example.sharepoint.com/sites/work-schedules/item-1',
+            'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work-schedules/item-1',
         ], $overrides);
     }
 
@@ -279,7 +279,7 @@ class SharePointAttachmentPreviewTest extends TestCase
         $this->mock(MicrosoftGraphSharePointStorageService::class)
             ->shouldReceive('downloadWithMetadata')
             ->times($times)
-            ->with($attachment->sharepoint_item_id)
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id)
             ->andReturn($this->download($attachment, $contents, $mimeType));
     }
 

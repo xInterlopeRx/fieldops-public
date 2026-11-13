@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Exceptions\MicrosoftGraphApiException;
+use App\Models\ApplicationSetupState;
 use App\Models\Customer;
 use App\Models\SharePointAttachment;
 use App\Models\Site;
@@ -34,7 +35,7 @@ class SharePointAttachmentLifecycleTest extends TestCase
         $this->mock(MicrosoftGraphSharePointStorageService::class)
             ->shouldReceive('delete')
             ->once()
-            ->with($attachment->sharepoint_item_id);
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id, $attachment->sharepoint_site_id);
         Notification::fake();
 
         app(SharePointAttachmentDeletionService::class)->delete($attachment, $admin);
@@ -59,7 +60,7 @@ class SharePointAttachmentLifecycleTest extends TestCase
         $this->mock(MicrosoftGraphSharePointStorageService::class)
             ->shouldReceive('delete')
             ->once()
-            ->with($attachment->sharepoint_item_id)
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id, $attachment->sharepoint_site_id)
             ->andThrow(new MicrosoftGraphApiException('graph_delete_failure', 503));
         Notification::fake();
 
@@ -156,6 +157,8 @@ class SharePointAttachmentLifecycleTest extends TestCase
     /** @return array{Customer, Site, WorkOrder} */
     private function jobFixture(User $admin, User $participant): array
     {
+        ApplicationSetupState::query()->whereKey(1)->update(['onboarding_required' => false]);
+        config(['services.microsoft_graph.sharepoint_enabled' => true]);
         $company = Customer::query()->create(['name' => 'Lifecycle customer']);
         $site = $company->sites()->create(['name' => 'Lifecycle site']);
         $job = WorkOrder::query()->create([
@@ -180,7 +183,7 @@ class SharePointAttachmentLifecycleTest extends TestCase
             'file_size' => 12,
             'sharepoint_drive_id' => 'drive-lifecycle',
             'sharepoint_item_id' => 'item-lifecycle-'.fake()->unique()->uuid(),
-            'sharepoint_url' => 'https://example.sharepoint.com/sites/work-schedules/lifecycle.pdf',
+            'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work-schedules/lifecycle.pdf',
         ]);
     }
 }

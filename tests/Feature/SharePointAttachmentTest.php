@@ -10,15 +10,64 @@ use App\Models\SharePointAttachment;
 use App\Models\Site;
 use App\Models\User;
 use App\Models\WorkOrder;
+use App\Services\AttachmentLifecycleService;
 use App\Services\AttachmentListService;
 use App\Services\MicrosoftGraphSharePointStorageService;
+use App\Services\SharePointAttachmentTargetResolver;
+use App\Services\SharePointAttachmentUploadService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 class SharePointAttachmentTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_new_upload_records_the_resolved_business_attachments_target(): void
+    {
+        $customer = Customer::query()->create(['name' => 'Business target customer']);
+        $actor = User::factory()->admin()->create(['status' => 'active']);
+        $file = UploadedFile::fake()->createWithContent('customer-photo.jpg', "\xFF\xD8\xFFfixture");
+        $target = [
+            'site_id' => 'business-site-id',
+            'drive_id' => 'business-drive-id',
+            'target' => SharePointAttachment::TARGET_BUSINESS_ATTACHMENTS,
+        ];
+
+        $this->mock(SharePointAttachmentTargetResolver::class)
+            ->shouldReceive('forNewAttachment')
+            ->once()
+            ->andReturn($target);
+        $this->mock(MicrosoftGraphSharePointStorageService::class)
+            ->shouldReceive('uploadToTarget')
+            ->once()
+            ->withArgs(fn (string $siteId, string $driveId, string $path, string $contents, string $contentType): bool => $siteId === 'business-site-id'
+                && $driveId === 'business-drive-id'
+                && str_starts_with($path, 'FieldOps/customer-'.$customer->getKey().'/'))
+            ->andReturn([
+                'id' => 'business-item-id',
+                'name' => 'attachment.jpg',
+                'size' => $file->getSize(),
+                'mime_type' => 'image/jpeg',
+                'e_tag' => 'business-etag',
+                'c_tag' => null,
+                'last_modified_at' => null,
+                'sharepoint_url' => 'https://tenant.sharepoint.com/sites/business-attachments/attachment.jpg',
+            ]);
+        $this->mock(AttachmentLifecycleService::class)
+            ->shouldReceive('uploaded')
+            ->once();
+
+        $attachment = app(SharePointAttachmentUploadService::class)->uploadForCustomer($file, $customer, $actor);
+
+        $this->assertSame($customer->getKey(), $attachment->company_id);
+        $this->assertSame('business-site-id', $attachment->sharepoint_site_id);
+        $this->assertSame('business-drive-id', $attachment->sharepoint_drive_id);
+        $this->assertSame(SharePointAttachment::TARGET_BUSINESS_ATTACHMENTS, $attachment->sharepoint_target);
+        $this->assertSame('business-item-id', $attachment->sharepoint_item_id);
+        $this->assertModelExists($attachment);
+    }
 
     public function test_metadata_preserves_sharepoint_fields_and_all_owner_relationships(): void
     {
@@ -59,9 +108,11 @@ class SharePointAttachmentTest extends TestCase
             'filename' => 'site-photo.jpg',
             'mime_type' => 'image/jpeg',
             'file_size' => 2048,
+            'sharepoint_site_id' => null,
+            'sharepoint_target' => SharePointAttachment::TARGET_WORK_SCHEDULES,
             'sharepoint_drive_id' => 'drive-library-1',
             'sharepoint_item_id' => 'drive-item-1',
-            'sharepoint_url' => 'https://example.sharepoint.com/sites/work/drive-item-1',
+            'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work/drive-item-1',
         ]);
         $this->assertSame(2048, $attachment->file_size);
         $this->assertTrue($company->sharePointAttachments()->whereKey($attachment->getKey())->exists());
@@ -156,7 +207,7 @@ class SharePointAttachmentTest extends TestCase
         $this->mock(MicrosoftGraphSharePointStorageService::class)
             ->shouldReceive('metadata')
             ->once()
-            ->with($attachment->sharepoint_item_id)
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id)
             ->andThrow(new MicrosoftGraphApiException('graph_record_not_found', 404));
 
         $this->actingAs($admin)
@@ -234,7 +285,7 @@ class SharePointAttachmentTest extends TestCase
         $this->mock(MicrosoftGraphSharePointStorageService::class)
             ->shouldReceive('metadata')
             ->once()
-            ->with($attachment->sharepoint_item_id)
+            ->with($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id)
             ->andReturn([
                 'id' => $attachment->sharepoint_item_id,
                 'name' => $attachment->filename,
@@ -327,7 +378,7 @@ class SharePointAttachmentTest extends TestCase
             'file_size' => 2048,
             'sharepoint_drive_id' => 'drive-library-1',
             'sharepoint_item_id' => 'drive-item-1',
-            'sharepoint_url' => 'https://example.sharepoint.com/sites/work/drive-item-1',
+            'sharepoint_url' => 'https://tenant.sharepoint.com/sites/work/drive-item-1',
         ], $overrides);
     }
 }

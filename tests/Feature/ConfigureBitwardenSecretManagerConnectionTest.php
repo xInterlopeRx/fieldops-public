@@ -107,11 +107,8 @@ class ConfigureBitwardenSecretManagerConnectionTest extends TestCase
         Process::assertRan([BwsSecretHelper::HELPER_COMMAND]);
     }
 
-    public function test_csv_import_mode_verifies_only_graph_secrets_in_bws(): void
+    public function test_bws_quickbooks_opt_out_verifies_only_graph_secrets(): void
     {
-        ApplicationSetupState::query()->whereKey(1)->update([
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV,
-        ]);
         $admin = User::factory()->admin()->create(['status' => 'active']);
         Process::fake(function (PendingProcess $process) {
             $payload = json_decode($process->input, true, flags: JSON_THROW_ON_ERROR);
@@ -138,11 +135,8 @@ class ConfigureBitwardenSecretManagerConnectionTest extends TestCase
         Process::assertRan([BwsSecretHelper::HELPER_COMMAND]);
     }
 
-    public function test_csv_import_mode_verifies_only_graph_secrets_and_persists_the_profile(): void
+    public function test_bws_quickbooks_opt_out_verifies_only_graph_secrets_and_persists_the_profile(): void
     {
-        ApplicationSetupState::query()->whereKey(1)->update([
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV,
-        ]);
         $admin = User::factory()->admin()->create(['status' => 'active']);
         Process::fake(function (PendingProcess $process) {
             $request = json_decode($process->input, true, flags: JSON_THROW_ON_ERROR);
@@ -325,7 +319,7 @@ class ConfigureBitwardenSecretManagerConnectionTest extends TestCase
     public function test_invalid_deployment_bws_endpoint_is_rejected_before_the_helper_runs(): void
     {
         $admin = User::factory()->admin()->create(['status' => 'active']);
-        config(['services.bitwarden.api_url' => 'https://user@example.test']);
+        config(['services.bitwarden.api_url' => 'https://user:password@api.example.test']);
         Process::fake();
 
         try {
