@@ -17,7 +17,9 @@ use App\Models\WorkOrderAttachment;
 use App\Observers\BusinessActivityObserver;
 use App\Observers\OutlookContactObserver;
 use App\Policies\TimeEntryPolicy;
+use App\Services\Contracts\SharePointAttachmentUploader;
 use App\Services\QueueWorkerStatus;
+use App\Services\SharePointAttachmentUploadService;
 use App\Services\SmtpBootstrapConfiguration;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -35,7 +37,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(
+            SharePointAttachmentUploader::class,
+            SharePointAttachmentUploadService::class,
+        );
     }
 
     /**
@@ -92,11 +97,10 @@ class AppServiceProvider extends ServiceProvider
 
     private function graphOnboardingLimit(Request $request, int $productionAttempts, int $productionDecayMinutes, int $localAttempts): Limit
     {
-        $isLocal = $this->app->environment('local');
+        $key = (string) ($request->user()?->getAuthIdentifier() ?? $request->ip());
 
-        return Limit::perMinutes(
-            $isLocal ? 1 : $productionDecayMinutes,
-            $isLocal ? $localAttempts : $productionAttempts,
-        )->by((string) ($request->user()?->getAuthIdentifier() ?? $request->ip()));
+        return $this->app->environment('local')
+            ? Limit::perMinutes(1, $localAttempts)->by($key)
+            : Limit::perMinutes($productionDecayMinutes, $productionAttempts)->by($key);
     }
 }

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\TimeEntryActivityType;
 use App\Enums\TimeEntryApprovalStatus;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -69,5 +70,26 @@ class TimeEntry extends Model
     public function updatedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by');
+    }
+
+    public function scopeVisibleTo(Builder $query, User $viewer): Builder
+    {
+        if ($viewer->can('time_entries.view_all')) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $visible) use ($viewer): void {
+            $visible->where('user_id', $viewer->getKey());
+
+            if (! $viewer->can('time_entries.view_team')) {
+                return;
+            }
+
+            $visible->orWhere(function (Builder $team) use ($viewer): void {
+                $team->whereHas('job.assignedUsers', fn (Builder $users) => $users->whereKey($viewer->getKey()))
+                    ->orWhereHas('visit.assignedUsers', fn (Builder $users) => $users->whereKey($viewer->getKey()))
+                    ->orWhereHas('project.assignedUsers', fn (Builder $users) => $users->whereKey($viewer->getKey()));
+            });
+        });
     }
 }

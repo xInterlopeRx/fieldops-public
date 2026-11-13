@@ -9,6 +9,7 @@ use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class StaffRolesTest extends TestCase
@@ -34,7 +35,7 @@ class StaffRolesTest extends TestCase
         );
     }
 
-    public function test_admin_cannot_create_an_invitation_without_exactly_one_account_role(): void
+    public function test_admin_cannot_assign_the_admin_account_role_through_an_invitation(): void
     {
         $this->markExistingInstallationReady();
         $admin = User::factory()->admin()->create(['status' => 'active']);
@@ -44,9 +45,9 @@ class StaffRolesTest extends TestCase
             ->post(route('admin.users.invitations.store'), [
                 'name' => 'Invalid invite',
                 'email' => 'invalid@example.test',
-                'roles' => ['admin', 'basic_user', 'management'],
+                'roles' => ['admin'],
             ])
-            ->assertSessionHasErrors('roles');
+            ->assertSessionHasErrors('roles.0');
 
         $this->assertDatabaseMissing('user_invitations', ['email' => 'invalid@example.test']);
     }
@@ -85,7 +86,8 @@ class StaffRolesTest extends TestCase
 
         $this->actingAs($admin)
             ->patch(route('admin.users.roles.update', $staff), [
-                'roles' => ['basic_user', 'management', 'billing'],
+                'security_groups' => [],
+                'notification_roles' => ['management', 'billing'],
             ])
             ->assertRedirect();
 
@@ -105,33 +107,119 @@ class StaffRolesTest extends TestCase
             ->assertForbidden();
     }
 
-    public function test_user_cannot_remove_its_own_admin_role_or_the_last_active_admin_role(): void
+    public function test_hr_can_assign_multiple_security_groups_from_the_staff_profile(): void
     {
-        $soleAdmin = User::factory()->admin()->create(['status' => 'active']);
+        $hr = User::factory()->create(['status' => 'active']);
+        $hr->syncRoles(['basic_user', 'hr']);
+        $staff = User::factory()->create(['status' => 'active']);
 
-        $this->actingAs($soleAdmin)
-            ->patch(route('admin.users.roles.update', $soleAdmin), ['roles' => ['basic_user']])
-            ->assertUnprocessable();
-        $this->actingAs($soleAdmin)
-            ->patch(route('admin.users.status.update', $soleAdmin), ['status' => 'inactive'])
-            ->assertUnprocessable();
+        $this->actingAs($hr)
+            ->get(route('admin.users'))
+            ->assertOk();
 
-        $anotherAdmin = User::factory()->admin()->create(['status' => 'active']);
-        $this->actingAs($anotherAdmin)
-            ->patch(route('admin.users.status.update', $soleAdmin), ['status' => 'inactive'])
+        $this->actingAs($hr)
+            ->patch(route('admin.users.roles.update', $staff), [
+                'security_groups' => ['finance', 'hr'],
+                'notification_roles' => ['management'],
+            ])
             ->assertRedirect();
 
-        $this->actingAs($anotherAdmin)
-            ->patch(route('admin.users.roles.update', $anotherAdmin), ['roles' => ['basic_user']])
+        $staff->refresh();
+        $this->assertEqualsCanonicalizing(
+            ['basic_user', 'finance', 'hr', 'management'],
+            $staff->getRoleNames()->all(),
+        );
+        $this->assertTrue($staff->can('time_entries.view_all'));
+        $this->assertTrue($staff->can('time_entries.view_financial'));
+        $this->assertTrue($staff->can('time_entries.review'));
+        $this->assertTrue($staff->can('users.manage'));
+    }
+
+    public function test_finance_user_cannot_manage_staff_roles(): void
+    {
+        $finance = User::factory()->create(['status' => 'active']);
+        $finance->syncRoles(['basic_user', 'finance']);
+        $staff = User::factory()->create(['status' => 'active']);
+
+        $this->actingAs($finance)
+            ->get(route('admin.users'))
+            ->assertForbidden();
+
+        $this->actingAs($finance)
+            ->get(route('admin.projects'))
+            ->assertInertia(fn (Assert $page) => $page->component('Admin/Projects'));
+
+        $this->actingAs($finance)
+            ->get(route('admin.archive'))
+            ->assertInertia(fn (Assert $page) => $page->component('Admin/Archive'));
+
+        $this->actingAs($finance)
+            ->get(route('admin.sync-logs'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Admin/SyncLogs')
+                ->where('auth.can_view_sync_logs', true)
+                ->where('auth.can_manage_users', false));
+
+        $this->actingAs($finance)
+            ->get(route('admin.time-tracking.dashboard'))
+            ->assertInertia(fn (Assert $page) => $page->component('Admin/TimeTracking/Dashboard'));
+
+        $this->actingAs($finance)
+            ->patch(route('admin.users.roles.update', $staff), [
+                'security_groups' => ['hr'],
+                'notification_roles' => [],
+            ])
+            ->assertForbidden();
+
+        $this->assertEqualsCanonicalizing(['basic_user'], $staff->fresh()->getRoleNames()->all());
+    }
+
+    public function test_admin_without_security_groups_gets_archive_logs_and_shared_team_timesheets_but_not_staff_or_financial_time_tracking(): void
+    {
+        $admin = User::factory()->adminWithoutSecurityGroups()->create(['status' => 'active']);
+
+        $this->actingAs($admin)
+            ->get(route('admin.users'))
+            ->assertForbidden();
+
+        $this->actingAs($admin)
+            ->get(route('admin.archive'))
+            ->assertInertia(fn (Assert $page) => $page->component('Admin/Archive'));
+
+        $this->actingAs($admin)
+            ->get(route('admin.sync-logs'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Admin/SyncLogs')
+                ->where('auth.can_view_sync_logs', true));
+
+        $this->actingAs($admin)
+            ->get(route('admin.time-tracking.dashboard'))
+            ->assertInertia(fn (Assert $page) => $page->component('Admin/TimeTracking/Team'));
+
+        $this->actingAs($admin)
+            ->get(route('admin.time-tracking.billing'))
+            ->assertForbidden();
+    }
+
+    public function test_staff_profile_cannot_assign_admin_account_role_and_last_admin_cannot_be_deactivated(): void
+    {
+        $admin = User::factory()->admin()->create(['status' => 'active']);
+        $staff = User::factory()->create(['status' => 'active']);
+
+        $this->actingAs($admin)
+            ->patch(route('admin.users.roles.update', $staff), [
+                'security_groups' => ['admin'],
+                'notification_roles' => [],
+            ])
+            ->assertSessionHasErrors('security_groups.0');
+
+        $this->actingAs($admin)
+            ->patch(route('admin.users.status.update', $admin), ['status' => 'inactive'])
             ->assertUnprocessable();
 
-        $this->actingAs($anotherAdmin)
-            ->patch(route('admin.users.roles.update', $soleAdmin), ['roles' => ['basic_user']])
-            ->assertRedirect();
-
-        $this->assertSame('inactive', $soleAdmin->fresh()->status);
-        $this->assertTrue($anotherAdmin->fresh()->isAdmin());
-        $this->assertFalse($soleAdmin->fresh()->hasRole('admin'));
+        $this->assertTrue($admin->fresh()->hasRole('admin'));
+        $this->assertSame('active', $admin->fresh()->status);
+        $this->assertEqualsCanonicalizing(['basic_user'], $staff->fresh()->getRoleNames()->all());
     }
 
     private function markExistingInstallationReady(): void

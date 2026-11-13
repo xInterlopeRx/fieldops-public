@@ -83,6 +83,27 @@ class QuickBooksCustomerSyncTest extends TestCase
         Queue::assertNothingPushed();
     }
 
+    public function test_customer_detail_includes_each_site_primary_contact_for_job_creation(): void
+    {
+        $customer = Customer::create(['name' => 'Site Contact Customer']);
+        $site = $customer->sites()->create(['name' => 'Site with contact']);
+        $contact = $customer->contacts()->create([
+            'contact_type' => 'primary',
+            'first_name' => 'Site',
+            'last_name' => 'Contact',
+            'email' => 'site-contact@example.test',
+            'phone' => '555-0101',
+        ]);
+        $site->update(['primary_contact_id' => $contact->getKey()]);
+
+        $this->actingAs($this->user())
+            ->getJson(route('customers.show', $customer))
+            ->assertOk()
+            ->assertJsonPath('data.sites.0.primary_contact.id', $contact->getKey())
+            ->assertJsonPath('data.sites.0.primary_contact.email', 'site-contact@example.test')
+            ->assertJsonPath('data.sites.0.primary_contact.phone', '555-0101');
+    }
+
     public function test_user_can_force_a_refresh_even_when_the_customer_is_fresh(): void
     {
         $this->connectQuickBooks();
@@ -291,8 +312,10 @@ class QuickBooksCustomerSyncTest extends TestCase
 
         $manualContact->refresh();
         $this->assertSame('manual', $manualContact->source);
-        $this->assertSame('Technician', $manualContact->first_name);
-        $this->assertSame('555-0199', $manualContact->phone);
+        $this->assertSame('Martha', $manualContact->first_name);
+        $this->assertSame('Freeman', $manualContact->last_name);
+        $this->assertSame('office@example.test', $manualContact->email);
+        $this->assertSame('555-0100', $manualContact->phone);
         $this->assertSame('quickbooks', $quickBooksContact->fresh()->source);
         $this->assertNull($quickBooksContact->fresh()->first_name);
         $this->assertNull($quickBooksContact->fresh()->email);
@@ -381,6 +404,7 @@ class QuickBooksCustomerSyncTest extends TestCase
         $this->assertSame('Email', $site->preferred_delivery_method);
         $this->assertSame('Ocean View Check Name', $site->quickbooks_print_on_check_name);
         $this->assertSame('29 Ocean View, Austin TX 78701, USA', $site->address);
+        $this->assertSame($contact->getKey(), $site->primary_contact_id);
         $this->assertDatabaseMissing('sites', ['quickbooks_id' => '102']);
         $this->assertSame('Site', $contact->first_name);
         $this->assertSame('Contact', $contact->last_name);

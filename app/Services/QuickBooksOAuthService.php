@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Exceptions\QuickBooksApiException;
-use App\Models\ApplicationSetupState;
 use App\Models\BitwardenSecretManagerConnection;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
@@ -28,8 +27,8 @@ class QuickBooksOAuthService
 
     public function apiModeEnabled(): bool
     {
-        return ApplicationSetupState::query()->whereKey(1)->value('quickbooks_import_mode')
-            !== ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV;
+        // The first-run import source is chosen by the action taken, not a mode.
+        return true;
     }
 
     /**

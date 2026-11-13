@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from "vue";
-import { XMarkIcon } from "@heroicons/vue/24/outline";
+import { computed, onMounted, onBeforeUnmount, ref, useSlots } from "vue";
+import { MagnifyingGlassIcon, XMarkIcon } from "@heroicons/vue/24/outline";
 import {
     useGlobalSearchAutocomplete,
     type GlobalSearchResult,
@@ -15,9 +15,13 @@ const props = withDefaults(defineProps<{
     clearLabel?: string;
     suggestionTypes?: GlobalSearchResultType[];
     dispatchSelection?: boolean;
+    showSearchIcon?: boolean;
+    searchIconLabel?: string;
 }>(), {
     clearLabel: "Clear search",
     dispatchSelection: true,
+    showSearchIcon: false,
+    searchIconLabel: "Focus search",
 });
 
 const emit = defineEmits<{
@@ -25,6 +29,7 @@ const emit = defineEmits<{
     clear: [];
     select: [result: GlobalSearchResult];
 }>();
+const slots = useSlots();
 
 const root = ref<HTMLElement | null>(null);
 const input = ref<HTMLInputElement | null>(null);
@@ -72,17 +77,25 @@ const selectResult = (result: GlobalSearchResult): void => {
     }
 };
 
-const handleInputKeydown = (event: KeyboardEvent): void => handleKeydown(event, selectResult);
+const handleInputKeydown = (event: KeyboardEvent): void => {
+    if (event.key === "Enter" && isOpen.value && !isLoading.value && results.value.length === 0) {
+        closeSuggestions();
+    }
+
+    handleKeydown(event, selectResult);
+};
 
 const resultTypeLabel = (type: GlobalSearchResultType): string => {
     switch (type) {
         case "client":
             return "Customer";
+        case "site":
+            return "Site";
         case "job":
             return "Job";
         case "visit":
             return "Visit";
-        default:
+        case "project":
             return "Project";
     }
 };
@@ -97,9 +110,10 @@ const isExactMatch = (result: GlobalSearchResult): boolean => {
 </script>
 
 <template>
-    <span ref="root" class="fieldops-clearable-search">
+    <span ref="root" class="fieldops-clearable-search" :class="{ 'fieldops-clearable-search--with-action': slots.action || props.showSearchIcon }">
         <input
             v-bind="$attrs"
+            ref="input"
             :id="props.id"
             type="search"
             maxlength="100"
@@ -123,6 +137,17 @@ const isExactMatch = (result: GlobalSearchResult): boolean => {
             @click="clear"
         >
             <XMarkIcon class="h-4 w-4" aria-hidden="true" />
+        </button>
+        <slot name="action" :close-suggestions="closeSuggestions" />
+        <button
+            v-if="props.showSearchIcon && !slots.action"
+            type="button"
+            class="fieldops-clearable-search__action"
+            :aria-label="props.searchIconLabel"
+            :title="props.searchIconLabel"
+            @click="input?.focus()"
+        >
+            <MagnifyingGlassIcon class="h-5 w-5" aria-hidden="true" />
         </button>
         <div
             v-if="isOpen"

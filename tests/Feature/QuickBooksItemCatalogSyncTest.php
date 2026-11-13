@@ -141,31 +141,11 @@ class QuickBooksItemCatalogSyncTest extends TestCase
         $this->assertSame(0, $service->snapshot()['importedItems']);
     }
 
-    public function test_csv_only_mode_cannot_preview_or_sync_quickbooks_items(): void
-    {
-        $admin = $this->readyAdmin();
-        ApplicationSetupState::query()->whereKey(1)->update([
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV,
-        ]);
-        Http::preventStrayRequests();
-
-        try {
-            app(QuickBooksItemCatalogSyncService::class)->preview($admin);
-            $this->fail('CSV-only mode must not use the QuickBooks Item API.');
-        } catch (ValidationException $exception) {
-            $this->assertArrayHasKey('item_import', $exception->errors());
-        }
-
-        Http::assertNothingSent();
-        $this->assertDatabaseCount('items', 0);
-    }
-
     public function test_admin_can_refresh_the_read_only_item_catalog_from_the_quickbooks_page(): void
     {
         $this->configureQuickBooks();
         ApplicationSetupState::query()->whereKey(1)->update([
             'onboarding_required' => false,
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API,
         ]);
         $this->fakeIntuitBwsCredentials();
         $admin = $this->unclaimedAdminWithTotp();
@@ -211,7 +191,6 @@ class QuickBooksItemCatalogSyncTest extends TestCase
     {
         ApplicationSetupState::query()->whereKey(1)->update([
             'onboarding_required' => true,
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API,
         ]);
         $admin = User::factory()->admin()->create([
             'status' => 'active',

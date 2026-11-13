@@ -3,7 +3,6 @@
 namespace App\Jobs;
 
 use App\Models\QuickBooksInitialCustomerImport;
-use App\Services\CsvCustomerSiteImportService;
 use App\Services\QuickBooksInitialCustomerImportService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -28,10 +27,8 @@ class ProcessQuickBooksInitialCustomerImport implements ShouldQueue
         return [new HoldQuickBooksJobsWhenSyncPaused];
     }
 
-    public function handle(
-        QuickBooksInitialCustomerImportService $apiImport,
-        CsvCustomerSiteImportService $csvImport,
-    ): void {
+    public function handle(QuickBooksInitialCustomerImportService $apiImport): void
+    {
         try {
             $run = QuickBooksInitialCustomerImport::query()->find($this->importId);
 
@@ -39,23 +36,13 @@ class ProcessQuickBooksInitialCustomerImport implements ShouldQueue
                 return;
             }
 
-            $hasMore = $run->source === QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD
-                ? $csvImport->processNextBatch($run)
-                : $apiImport->processNextCustomer($run);
-
-            if (! $hasMore) {
+            if (! $apiImport->processNextCustomer($run)) {
                 return;
             }
 
             self::dispatch($this->importId)->onQueue(self::QUEUE);
         } catch (\Throwable) {
-            $run = QuickBooksInitialCustomerImport::query()->find($this->importId);
-
-            if ($run?->source === QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD) {
-                $csvImport->markUnexpectedJobFailure($this->importId);
-            } else {
-                $apiImport->markUnexpectedJobFailure($this->importId);
-            }
+            $apiImport->markUnexpectedJobFailure($this->importId);
         }
     }
 }

@@ -8,7 +8,8 @@ Use a normalized relational PostgreSQL model. Use JSONB only for provider payloa
 
 - organizations
 - users
-- Spatie roles and permissions on users; `admin` / `basic_user` are account roles and `management` / `billing` are notification roles (teams disabled)
+- Spatie roles and permissions on users (teams disabled); `admin` / `basic_user` are account roles, additive `finance` / `hr` roles are service security groups, and `management` / `billing` are notification roles
+- `admin_role_transfers` (pending/accepted one-day Admin-role offers with source/recipient User FKs and completion timestamps; transfer is the only post-bootstrap Admin grant path)
 - customers
 - customer_addresses (billing/shipping address book; may reference a site)
 - customer_email_addresses (unassociated customer email addresses)
@@ -46,7 +47,7 @@ Use a normalized relational PostgreSQL model. Use JSONB only for provider payloa
 - installation_claims (singleton initial-Admin claim timestamp and actor; existing installations are marked claimed during migration)
 - application_setup_states (singleton fresh-install readiness gate, QuickBooks opt-in/paused state and required post-opt-in BWS recheck, API-vs-CSV Customer/Site source mode, and recorded completion receipt; existing installations are grandfathered)
 - application_setup_steps (bounded per-step status, attempt time/count, sanitized failure code, progress counters, actor, and completion time for first Admin, BWS, QuickBooks OAuth/import, Graph validation, and failure reconciliation)
-- microsoft_graph_onboarding_targets (one manually supplied tenant/client/mailbox/calendar and Work Schedules/Business Attachments target set per environment; explicit target shared-mailbox and optional non-target user-mailbox confirmations; boundary/preflight results; and nullable runtime activation time/actor. Type confirmations are external assertions, not Exchange recipient-type queries. Onboarding-required runtime consumers use the saved target only after an explicit readiness/evidence-gated activation; legacy installs continue to use deployment configuration. Activation blocks on mailbox-ID mismatches and unresolved/in-flight Graph work.)
+- microsoft_graph_onboarding_targets (one manually supplied tenant/client/mailbox/calendar and Work Schedules/Business Attachments target set per environment; explicit target shared-mailbox and optional non-target user-mailbox confirmations; boundary/preflight results; nullable runtime activation and Business Attachments write-activation times/actors. Type confirmations are external assertions, not Exchange recipient-type queries. Onboarding-required runtime consumers use the saved target only after readiness/evidence-gated activation; Business Attachments writes additionally wait for complete attachment-pointer reconciliation. Legacy installs continue to use deployment configuration. Runtime activation blocks on mailbox-ID mismatches and unresolved/in-flight Graph work.)
 - graph_onboarding_challenges (one-time, expiring Graph email-linkback attempts scoped to a saved target, environment, and first Admin; stores only a SHA-256 token hash and recipient-address hash, challenge status, timestamps, and sanitized failure code)
 - microsoft_graph_onboarding_canaries (durable Calendar/Contacts canary attempts with target tenant/app/mailbox/calendar snapshot, unique operation ID, remote resource ID/ETag, create/cleanup/manual-reconciliation statuses, actor/timestamps, and sanitized failure code; tokens are not persisted; target deletion is restricted and actor deletion preserves the canary row)
 - microsoft_graph_onboarding_permission_verifications (append-only M365-admin attestation snapshots for exact tenant/app/shared-mailbox target, exact non-target user-mailbox UPN, mailbox-type confirmations, and Business Attachments Site/Drive; records target/non-target mail and calendar scope results, Contacts/SharePoint boundary review, retention/unscoped-grant review, admin UPN, non-secret reference, actor, and timestamp; raw outputs and tokens are not stored)
@@ -64,14 +65,38 @@ Use a normalized relational PostgreSQL model. Use JSONB only for provider payloa
 ## Modeling rules
 
 - Use internal primary keys and separate provider identifiers.
+- Keep account roles, service groups, and notification roles distinct. Finance/HR group roles are additive Spatie roles, while service capabilities remain individual permissions. Only the initial claimant receives all security groups automatically; subsequent memberships are assigned through the authorized Staff workflow. `admin_role_transfers` records the recipient-accepted transfer of the single active Admin account role; normal invitations and group editing cannot grant that role.
+- Customers may carry one controlled `customer_group` (`residential`,
+  `commercial`, `industrial`, or `non_profit`) and one controlled
+  `customer_status` (`opportunity`, `current_client`, `transferred_client`, or
+  `lost_opportunity`). Existing imports remain unassigned until reviewed.
+  Archiving is the separate Archiveable lifecycle: the Admin's Archived action
+  runs the recoverable archive workflow, removing the Customer from the active
+  directory; restore reveals the prior customer status.
+- FieldPulse Projects imported from the retained archive workbook keep their
+  source key in nullable unique `projects.fieldpulse_id`; the visible
+  `project_number` remains a separate business reference. Jobs link through
+  `work_orders.project_id` only when the imported Project belongs to the same
+  Customer as the Job's Site.
+- A Customer's customer-wide Contact with role `primary` supplies the Customer
+  profile's primary-person snapshot fields used by the QuickBooks Customer
+  contract. New manually created Contacts are Customer-wide by default.
+  `sites.primary_contact_id` separately identifies a Site's selected primary
+  Contact without changing its role or scope; any Contact belonging to that
+  Customer can be selected, including one already scoped to another Site.
+  QuickBooks-owned Site primary Contacts retain their Site scope. The `other`
+  role is non-exclusive so a Customer can have multiple additional Contacts.
 - Add organization_id even in single-tenant Release 1 where practical, but do not build tenant provisioning.
 - Preserve historical events when external records become inactive.
-- Keep customer billing and shipping addresses separate from operational sites. A customer address may be manually entered, imported from QuickBooks, or copied from a linked site; retain its source, optional source-site reference, and default purpose. Preserve a linked QBO child Job's `BillAddr` and `ShipAddr` as separate site-linked address rows rather than flattening or conflating the two.
-- Contacts belong to a Customer and may optionally be scoped to one of that
-  Customer's Sites (`site_id` is null for Customer-wide Contacts). The workspace
-  validates that a selected Site belongs to the same Customer. `contact_type`
-  carries the Contact role, including primary/additional and operational roles
-  such as Gate Contact, Supervisor, Operations Contact, and Safety Contact.
+- Keep Customer billing and default shipping addresses separate from operational Sites. A Customer address may be manually entered, imported from QuickBooks, or copied from a linked Site; retain its source, optional source-site reference, and default purpose. The Customer workspace exposes the optional default shipping address and can copy the current billing fields into it; this copies values rather than creating a live address link. Preserve a linked QBO child Job's `BillAddr` and `ShipAddr` as separate Site-linked address rows rather than flattening or conflating the two. Site forms edit the structured Site-linked shipping address; `sites.address` remains a formatted display/search compatibility projection.
+- Contacts belong to a Customer and may retain an optional Site scope
+  (`site_id` is null for Customer-wide Contacts). New manually created Contacts
+  default to Customer-wide. Site primary-contact selection is a separate link
+  and offers every active Contact in that Customer's address book regardless of
+  the Contact's existing scope; selecting a Contact does not move or retype it.
+  `contact_type` carries the Contact role, including primary/additional and
+  operational roles such as Gate Contact, Supervisor, Operations Contact, and
+  Safety Contact.
 - A Contact may have multiple related `contact_methods`. Each method has one
   constrained type (`email`, `phone`, or `teams`), a constrained label
   (`office`, `mobile`, `dispatch`, `after_hours`, `operations`, or `personal`),
@@ -99,7 +124,7 @@ Use a normalized relational PostgreSQL model. Use JSONB only for provider payloa
 - Customer-level unassociated email addresses are relational rows, not person Contacts or JSON metadata.
 - Attachments remain typed by owner: Customer, Project, or Job; a Job attachment may additionally reference a Visit. These relations preserve owner-specific authorization and archive behavior. Do not collapse them into a polymorphic owner without an explicit schema and authorization decision.
 - Attachment rows hold metadata and a Laravel disk/path pointer; bytes are outside PostgreSQL. At the A1 audit, current upload paths explicitly select the private `local` disk. `documents` and `document_links` are not present in the connected schema or current model tree as generic attachment storage.
-- `sharepoint_attachments` stores SharePoint DriveItem metadata (filename, MIME type, byte size, Drive/item IDs, normal SharePoint `webUrl`, optional uploader, nullable unique `client_upload_id` for idempotent browser-queued Job uploads, and owner context). The upload key is never serialized to attachment resources. `company_id` references `customers.id`; `site_id`, `project_id`, and `job_id` are optional. The unique Drive/item pair prevents duplicate metadata for one remote item. New upload flows populate these rows, but they remain separate from legacy attachment records; no automatic migration/copy association or binary is stored in PostgreSQL. The current provider is configured for one Site/Drive; future named storage targets and Site/Drive mapping are proposed in ADR-0036 and are not implemented.
+- `sharepoint_attachments` stores SharePoint DriveItem metadata (filename, MIME type, byte size, SharePoint Site ID, named target, Drive/item IDs, normal SharePoint `webUrl`, optional uploader, nullable unique `client_upload_id` for idempotent browser-queued Job uploads, and owner context). The upload key and provider target metadata are not serialized to attachment resources. `company_id` references `customers.id`; FieldOps `site_id`, `project_id`, and `job_id` are optional. The unique Drive/item pair prevents duplicate metadata for one remote item. Rows are separate from legacy local attachment records; no binary is stored in PostgreSQL. Named targets and per-row Drive reads are implemented. The resumable Work Schedules-to-Business-Attachments relocation preserves owner IDs and source DriveItems; see ADR-0035/0036.
 - `audit_events` are append-only actor/subject records; ordinary model-change metadata stores changed field names and scoped relation identifiers, not prior/new PII values. Explicit Microsoft onboarding attestations/manual provider-ID reconciliations may retain the M365-admin UPN, short non-secret reference, and exact mailbox-scoped provider IDs as required evidence; never store tokens, raw command output, or credentials.
 - Attachment lifecycle events use append-only `audit_events`; Laravel's
   `notifications` table stores in-app notices for active assigned staff, while

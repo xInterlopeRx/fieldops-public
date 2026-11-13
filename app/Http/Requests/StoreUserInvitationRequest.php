@@ -13,7 +13,7 @@ class StoreUserInvitationRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return $this->user()?->isAdmin() ?? false;
+        return $this->user()?->can('users.manage') ?? false;
     }
 
     /**
@@ -27,7 +27,7 @@ class StoreUserInvitationRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'lowercase', 'email', 'max:255', 'unique:users,email'],
             'roles' => ['required', 'array', 'min:1'],
-            'roles.*' => ['required', 'string', 'distinct', 'in:admin,basic_user,management,billing'],
+            'roles.*' => ['required', 'string', 'distinct', 'in:basic_user,management,billing'],
         ];
     }
 
@@ -37,12 +37,8 @@ class StoreUserInvitationRequest extends FormRequest
         return [function (Validator $validator): void {
             $roles = $this->input('roles', []);
 
-            $coreRoles = is_array($roles)
-                ? array_filter($roles, fn (mixed $role): bool => is_string($role) && in_array($role, ['admin', 'basic_user'], true))
-                : [];
-
-            if (count($coreRoles) !== 1) {
-                $validator->errors()->add('roles', 'Choose exactly one account role: Admin or Basic User.');
+            if (! is_array($roles) || ! in_array('basic_user', $roles, true)) {
+                $validator->errors()->add('roles', 'New invitations start as Basic User. Transfer the Admin account role separately after account setup.');
             }
         }];
     }

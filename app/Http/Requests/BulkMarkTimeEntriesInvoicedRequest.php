@@ -10,7 +10,7 @@ class BulkMarkTimeEntriesInvoicedRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()?->can('reviewAny', TimeEntry::class) ?? false;
+        return $this->user()?->can('manageBilling', TimeEntry::class) ?? false;
     }
 
     /**

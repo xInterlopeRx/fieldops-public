@@ -17,7 +17,27 @@ state.
 - Keep QuickBooks authoritative for fields covered by the supported
   Customer/Site synchronization contract. FieldOps writes the supported
   Customer profile fields, default addresses, Site profile fields, and Site
-  primary-contact fields through the existing sandbox-only queue. FieldOps-only
+  primary-contact fields through the existing sandbox-only queue. In the Admin
+  Customer workspace, one Company Name input updates both the FieldOps Customer
+  display name and QuickBooks CompanyName. A customer-wide address-book Contact
+  with role `primary` is the UI source for the parent Customer's primary contact
+  fields; saving it updates the corresponding Customer snapshot fields and
+  queues the supported QuickBooks write. A subsequent QuickBooks refresh mirrors
+  authoritative parent contact fields into that selected Contact when one exists.
+  A Site stores its structured service address in its Site-linked shipping
+  `customer_addresses` row and retains `sites.address` as a formatted compatibility
+  projection. The workspace keeps Customer default billing and shipping
+  addresses separate; its “Same as billing” option copies billing values into
+  the default shipping address and queues the supported `ShipAddr` write.
+  `sites.primary_contact_id` may reference any Contact belonging to
+  that Customer without changing its role or existing scope; manually created
+  Contacts default to Customer-wide, and every Customer Contact is selectable
+  for any of its Sites. QuickBooks-owned Site primary Contacts remain Site-scoped.
+  Site writes use the selected Site Contact and structured address, and
+  authoritative refreshes update that selected Contact when one exists. If one
+  Contact is selected for multiple Sites, each authoritative Site refresh may
+  update that shared Contact's fields with the selected Site's values.
+  Additional Contacts with role `other` are non-exclusive. FieldOps-only
   Contacts, additional email addresses, nondefault address-book entries, Jobs,
   Visits, Projects, assignments, and notes outside the mapped QBO contract stay
   local.

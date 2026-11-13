@@ -64,6 +64,7 @@ class AdminProjectWorkspaceController extends Controller
             'data' => [
                 'project' => [
                     'id' => $project->id,
+                    'customerId' => $project->customer_id,
                     'number' => $project->project_number,
                     'name' => $project->name,
                     'notes' => $project->notes,

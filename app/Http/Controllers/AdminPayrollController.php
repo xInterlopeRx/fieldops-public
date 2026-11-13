@@ -101,7 +101,7 @@ class AdminPayrollController extends Controller
 
     private function authorizePayrollReview(): void
     {
-        Gate::authorize('reviewAny', TimeEntry::class);
+        Gate::authorize('viewFinancial', TimeEntry::class);
     }
 
     /** @param array<string, mixed> $report

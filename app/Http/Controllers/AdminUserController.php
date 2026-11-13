@@ -6,6 +6,7 @@ use App\Http\Requests\StoreUserInvitationRequest;
 use App\Http\Requests\UpdateUserRolesRequest;
 use App\Models\User;
 use App\Models\UserInvitation;
+use App\Services\ActivityLogService;
 use App\Services\OnboardingReadinessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -68,25 +69,61 @@ class AdminUserController extends Controller
             abort_unless($this->anotherActiveAdminExists($user), 422, 'At least one active Admin account must remain.');
         }
 
+        if ($status === 'active' && $user->status === 'inactive' && $user->hasRole('admin')) {
+            abort_unless(! $this->anotherActiveAdminExists($user), 422, 'There must be exactly one active Admin account. Transfer the Admin role to this user instead.');
+        }
+
+        if ($status === 'inactive' && $user->status === 'active' && $user->hasRole('hr')) {
+            abort_unless($this->anotherActiveHrExists($user), 422, 'At least one active HR user must remain to manage staff access.');
+        }
+
         $user->update(['status' => $status]);
 
         return back();
     }
 
-    public function updateRoles(UpdateUserRolesRequest $request, User $user): RedirectResponse
-    {
-        $roles = $request->validated('roles');
-        $hasAdminRole = in_array('admin', $roles, true);
+    public function updateRoles(
+        UpdateUserRolesRequest $request,
+        User $user,
+        ActivityLogService $activityLog,
+    ): RedirectResponse {
+        $securityGroups = $request->validated('security_groups');
+        $notificationRoles = $request->validated('notification_roles', []);
 
-        abort_if($user->is($request->user()) && ! $hasAdminRole, 422, 'You cannot remove your own Admin role.');
-
-        if (! $hasAdminRole && $user->hasRole('admin') && $user->status === 'active') {
-            abort_unless($this->anotherActiveAdminExists($user), 422, 'At least one active Admin account must remain.');
+        if ($user->status === 'active' && $user->hasRole('hr') && ! in_array('hr', $securityGroups, true)) {
+            abort_unless($this->anotherActiveHrExists($user), 422, 'At least one active HR user must remain to manage staff access.');
         }
 
-        $user->syncRoles($roles);
+        $accountRole = $user->hasRole('admin') ? 'admin' : 'basic_user';
+        $managedRoles = ['finance', 'hr', 'management', 'billing'];
+        $previousManagedRoles = $user->getRoleNames()->intersect($managedRoles)->values()->all();
+        $nextManagedRoles = array_values(array_unique([
+            $accountRole,
+            ...$notificationRoles,
+            ...$securityGroups,
+        ]));
+        $user->syncRoles($nextManagedRoles);
+        $nextManagedRoles = array_values(array_diff($nextManagedRoles, [$accountRole]));
+        $addedRoles = array_values(array_diff($nextManagedRoles, $previousManagedRoles));
+        $removedRoles = array_values(array_diff($previousManagedRoles, $nextManagedRoles));
 
-        return back()->with('success', "Roles updated for {$user->name}.");
+        if ($addedRoles !== [] || $removedRoles !== []) {
+            $activityLog->record($user, 'security_groups_updated', [
+                'added_roles' => $addedRoles,
+                'removed_roles' => $removedRoles,
+            ], $request->user());
+        }
+
+        return back()->with('success', "Security groups updated for {$user->name}.");
+    }
+
+    private function anotherActiveHrExists(User $user): bool
+    {
+        return User::query()
+            ->whereKeyNot($user->id)
+            ->where('status', 'active')
+            ->role('hr')
+            ->exists();
     }
 
     private function anotherActiveAdminExists(User $user): bool

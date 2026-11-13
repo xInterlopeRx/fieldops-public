@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\TimeEntry;
 use App\Services\AdminOnboardingAreaAccess;
 use App\Services\SyncHealthService;
 use Illuminate\Http\Request;
@@ -31,16 +32,24 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
-        $canViewSyncLogs = $request->user()?->can('integrations.manage') ?? false;
+        $user = $request->user();
+        $canViewSyncLogs = $user?->can('integrations.view_logs') ?? false;
 
         return [
             ...parent::share($request),
             'auth' => [
                 'user' => $request->user(),
-                'is_admin' => $request->user()?->isAdmin() ?? false,
+                'is_admin' => $user?->isAdmin() ?? false,
+                'has_admin_account_role' => $user?->hasRole('admin') ?? false,
+                'can_manage_users' => $user?->can('users.manage') ?? false,
+                'can_manage_integrations' => $user?->can('integrations.manage') ?? false,
                 'can_view_sync_logs' => $canViewSyncLogs,
+                'can_view_time_tracking' => $user?->can('viewAny', TimeEntry::class) ?? false,
+                'can_view_financial_time_entries' => $user?->can('viewFinancial', TimeEntry::class) ?? false,
+                'can_view_time_entry_exceptions' => $user?->can('viewExceptions', TimeEntry::class) ?? false,
+                'can_review_time_entries' => $user?->can('reviewAny', TimeEntry::class) ?? false,
                 'onboarding_area_unlocked' => app(AdminOnboardingAreaAccess::class)
-                    ->isUnlocked($request, $request->user()),
+                    ->isUnlocked($request, $user),
             ],
             'sync_health' => $canViewSyncLogs ? app(SyncHealthService::class)->summary() : null,
             'work_order_default_status' => config('work_orders.default_status'),
@@ -51,6 +60,8 @@ class HandleInertiaRequests extends Middleware
                 ->all(),
             'flash' => [
                 'invitation_url' => $request->session()->get('invitation_url'),
+                'admin_transfer_url' => $request->session()->get('admin_transfer_url'),
+                'success' => $request->session()->get('success'),
             ],
         ];
     }

@@ -425,12 +425,6 @@ class QuickBooksItemCatalogSyncService
             ]);
         }
 
-        if ($state->quickbooks_import_mode !== ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API) {
-            throw ValidationException::withMessages([
-                'item_import' => 'QuickBooks Item synchronization is unavailable in CSV-only Customer/Site mode.',
-            ]);
-        }
-
         if (! $this->syncControl->isEnabled()) {
             throw ValidationException::withMessages([
                 'item_import' => 'QuickBooks synchronization is paused by an Admin. Resume it before syncing Items.',

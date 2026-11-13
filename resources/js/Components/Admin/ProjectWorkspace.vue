@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { XMarkIcon } from "@heroicons/vue/24/outline";
+import { PlusIcon, XMarkIcon } from "@heroicons/vue/24/outline";
 import ClearableSearchInput from "@/Components/ClearableSearchInput.vue";
 import AttachmentFileTypeIcon from "@/Components/AttachmentFileTypeIcon.vue";
 import AttachmentOnlineActions from "@/Components/AttachmentOnlineActions.vue";
@@ -13,7 +13,7 @@ import { usePressAndHold } from "@/Composables/usePressAndHold";
 import { useWorkOrderStatus } from "@/Composables/useWorkOrderStatus";
 
 interface ProjectWorkspaceData {
-    project: { id: number; number: string | null; name: string; notes: string | null; status: string; customerName: string | null };
+    project: { id: number; customerId: number; number: string | null; name: string; notes: string | null; status: string; customerName: string | null };
     sites: Array<{ id: number; name: string; address: string | null }>;
     availableSites: Array<{ id: number; name: string; address: string | null }>;
     attachments: Array<{ id: number; name: string; mimeType: string; size: number; uploadedBy: string | null; createdAt: string; url: string; previewUrl?: string | null; thumbnailUrl?: string | null; onlineUrl?: string | null; availabilityUrl?: string | null; officeApp?: "word" | "excel" | "powerpoint" | null }>;
@@ -29,8 +29,8 @@ interface StaffOption {
     roles: string[];
 }
 
-const props = withDefaults(defineProps<{ projectId: number; canArchive: boolean; nested?: boolean; inlineOnDesktop?: boolean; editRequestId?: number }>(), { nested: false, inlineOnDesktop: false, editRequestId: 0 });
-const emit = defineEmits<{ close: []; saved: []; archived: []; "editing-change": [editing: boolean] }>();
+const props = withDefaults(defineProps<{ projectId: number; canArchive: boolean; nested?: boolean; inlineOnDesktop?: boolean; showAddAction?: boolean; initialTab?: "details" | "jobs" | "activity"; editRequestId?: number }>(), { nested: false, inlineOnDesktop: false, showAddAction: false, initialTab: "details", editRequestId: 0 });
+const emit = defineEmits<{ close: []; saved: []; archived: []; "add-project": [customer: { id: number; name: string } | null]; "editing-change": [editing: boolean] }>();
 const isDesktopInline = useDesktopInlineWorkspace(props.inlineOnDesktop);
 const { badgeClass: jobStatusBadgeClass, label: jobStatusLabel } = useWorkOrderStatus();
 
@@ -40,7 +40,7 @@ const tabs = [
     { id: "activity", label: "Activity" },
 ] as const;
 
-const activeTab = ref<(typeof tabs)[number]["id"]>("details");
+const activeTab = ref<(typeof tabs)[number]["id"]>(props.initialTab);
 const loading = ref(true);
 const isEditing = ref(false);
 const saving = ref(false);
@@ -266,9 +266,21 @@ onMounted(() => {
                     <h2 class="truncate text-lg font-semibold text-gray-900">{{ data?.project.name ?? "Loading project" }}</h2>
                     <p class="text-sm text-gray-600">{{ data?.project.number || "No project number" }}<span v-if="data?.project.customerName"> · {{ data.project.customerName }}</span></p>
                 </div>
-                <button v-if="!isEditing" type="button" class="fieldops-secondary-action inline-flex h-10 w-10 items-center justify-center p-0" aria-label="Close project details" title="Close details" @click="requestClose">
-                    <XMarkIcon class="h-5 w-5" aria-hidden="true" />
-                </button>
+                <div class="flex shrink-0 items-center gap-2">
+                    <button
+                        v-if="props.showAddAction && !isEditing"
+                        type="button"
+                        class="fieldops-secondary-action fieldops-add-action inline-flex min-h-10 items-center gap-2 px-3 py-1"
+                        :disabled="!data"
+                        @click="emit('add-project', data ? { id: data.project.customerId, name: data.project.customerName ?? '' } : null)"
+                    >
+                        <PlusIcon class="h-4 w-4" aria-hidden="true" />
+                        Add Project
+                    </button>
+                    <button v-if="!isEditing" type="button" class="fieldops-secondary-action inline-flex h-10 w-10 items-center justify-center p-0" aria-label="Close project details" title="Close details" @click="requestClose">
+                        <XMarkIcon class="h-5 w-5" aria-hidden="true" />
+                    </button>
+                </div>
             </header>
 
             <nav class="fieldops-workspace-tabs" aria-label="Project sections">

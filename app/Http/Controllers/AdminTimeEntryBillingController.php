@@ -18,7 +18,7 @@ class AdminTimeEntryBillingController extends Controller
 {
     public function index(BillingReportRequest $request, TimeEntryBillingReportService $reports): InertiaResponse
     {
-        Gate::authorize('reviewAny', TimeEntry::class);
+        Gate::authorize('viewFinancial', TimeEntry::class);
 
         $filters = $request->validated();
 

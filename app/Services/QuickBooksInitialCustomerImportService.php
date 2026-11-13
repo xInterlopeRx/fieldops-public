@@ -349,10 +349,7 @@ class QuickBooksInitialCustomerImportService
     /** @return array{status: string, source: string, customersImported: int, sitesImported: int, customersProcessed: int, customersTotal: int, failureCount: int, failures: list<array{recordId: string, row: ?int, code: string}>, failureCode: ?string, canResume: bool, updatedAt: ?string} */
     public function snapshot(?string $source = null): array
     {
-        $source ??= ApplicationSetupState::query()->whereKey(1)->value('quickbooks_import_mode')
-            === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV
-            ? QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD
-            : QuickBooksInitialCustomerImport::SOURCE_QUICKBOOKS_API;
+        $source ??= QuickBooksInitialCustomerImport::SOURCE_QUICKBOOKS_API;
         $run = QuickBooksInitialCustomerImport::query()
             ->where('environment', app()->environment())
             ->where('source', $source)
@@ -425,12 +422,6 @@ class QuickBooksInitialCustomerImportService
         if (! $state->quickbooks_sync_opted_in) {
             throw ValidationException::withMessages([
                 'quickbooks_import' => 'Opt into QuickBooks synchronization in First-run setup before starting the Customer/Site import.',
-            ]);
-        }
-
-        if ($state->quickbooks_import_mode !== ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API) {
-            throw ValidationException::withMessages([
-                'quickbooks_import' => 'QuickBooks API import is disabled in CSV import mode.',
             ]);
         }
 

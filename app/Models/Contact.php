@@ -17,6 +17,7 @@ class Contact extends Model
         'site_id',
         'contact_type',
         'source',
+        'fieldpulse_id',
         'first_name',
         'middle_name',
         'last_name',

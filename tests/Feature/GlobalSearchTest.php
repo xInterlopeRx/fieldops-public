@@ -60,6 +60,29 @@ class GlobalSearchTest extends TestCase
             ->assertJsonPath('data.0.type', 'client');
     }
 
+    public function test_site_scoped_search_returns_the_site_and_owning_customer(): void
+    {
+        $user = User::factory()->create(['status' => 'active']);
+        $customer = Customer::factory()->create(['name' => 'Site Picker Customer']);
+        $site = $customer->sites()->create([
+            'name' => 'North Service Site',
+            'address' => '842 Needlebrook Road',
+        ]);
+
+        $this->actingAs($user)
+            ->getJson(route('global.search', [
+                'q' => 'North Service Site',
+                'type' => 'site',
+            ]))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $site->id)
+            ->assertJsonPath('data.0.parent_id', $customer->id)
+            ->assertJsonPath('data.0.type', 'site')
+            ->assertJsonPath('data.0.name', 'North Service Site')
+            ->assertJsonPath('data.0.detail', 'Site Picker Customer · 842 Needlebrook Road');
+    }
+
     public function test_global_search_prioritizes_one_suggestion_per_matching_section(): void
     {
         $user = User::factory()->create(['status' => 'active']);

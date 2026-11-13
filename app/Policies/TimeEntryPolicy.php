@@ -18,7 +18,22 @@ class TimeEntryPolicy
 
     public function reviewAny(User $user): bool
     {
-        return $user->status === 'active' && $user->can('admin.access');
+        return $user->status === 'active' && $user->can('time_entries.review');
+    }
+
+    public function viewFinancial(User $user): bool
+    {
+        return $user->status === 'active' && $user->can('time_entries.view_financial');
+    }
+
+    public function viewExceptions(User $user): bool
+    {
+        return $user->status === 'active' && $user->can('time_entries.view_exceptions');
+    }
+
+    public function manageBilling(User $user): bool
+    {
+        return $user->status === 'active' && $user->can('time_entries.billing.manage');
     }
 
     /**
@@ -27,7 +42,11 @@ class TimeEntryPolicy
     public function view(User $user, TimeEntry $timeEntry): bool
     {
         return $user->status === 'active'
-            && ($user->can('admin.access') || ($user->can('work_orders.view') && $timeEntry->user_id === $user->id));
+            && $user->can('work_orders.view')
+            && TimeEntry::query()
+                ->visibleTo($user)
+                ->whereKey($timeEntry->getKey())
+                ->exists();
     }
 
     /**
@@ -87,7 +106,7 @@ class TimeEntryPolicy
 
     public function markInvoiced(User $user, TimeEntry $timeEntry): bool
     {
-        return $this->reviewAny($user)
+        return $this->manageBilling($user)
             && $timeEntry->ended_at !== null
             && $timeEntry->billable
             && $timeEntry->approval_status === TimeEntryApprovalStatus::Approved;

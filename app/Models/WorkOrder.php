@@ -18,6 +18,7 @@ class WorkOrder extends Model
 
     protected $fillable = [
         'site_id',
+        'fieldpulse_id',
         'project_id',
         'job_number',
         'title',

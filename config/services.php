@@ -8,10 +8,20 @@ $notificationCalendarId = env('MICROSOFT_GRAPH_NOTIFICATION_CALENDAR_ID');
 
 return [
 
+    'smtp_bootstrap_diagnostics' => env('FIELDOPS_SMTP_BOOTSTRAP_DIAGNOSTICS', false),
+
     'bitwarden' => [
         'api_url' => env('BWS_API_URL', 'https://api.bitwarden.com'),
         'identity_url' => env('BWS_IDENTITY_URL', 'https://identity.bitwarden.com'),
         'helper_command' => env('BWS_HELPER_COMMAND'),
+    ],
+
+    // FieldPulse read-only capture gateway (ADR-0039). Operator-only: it exists
+    // to regenerate the aggregated FieldPulse document, not as a runtime
+    // dependency. The x-api-key resolves from BWS as FIELDPULSE_API_KEY.
+    'fieldpulse' => [
+        'base_url' => env('FIELDPULSE_API_URL', 'https://ywe3crmpll.execute-api.us-east-2.amazonaws.com/stage'),
+        'timeout' => (int) env('FIELDPULSE_TIMEOUT', 30),
     ],
 
     /*

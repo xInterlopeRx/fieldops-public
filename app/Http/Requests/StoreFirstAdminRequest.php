@@ -27,8 +27,6 @@ class StoreFirstAdminRequest extends FormRequest
                 'required',
                 Rule::in(app()->environment('local') ? ['starttls', 'ssl', 'none'] : ['starttls', 'ssl']),
             ],
-            'smtp_username' => ['nullable', 'string', 'max:255', 'required_with:smtp_password'],
-            'smtp_password' => ['nullable', 'string', 'max:1024', 'required_with:smtp_username'],
             'smtp_from_address' => ['required', 'email', 'max:255'],
             'smtp_from_name' => ['required', 'string', 'max:128', 'regex:/\A[^\r\n]+\z/u'],
         ];

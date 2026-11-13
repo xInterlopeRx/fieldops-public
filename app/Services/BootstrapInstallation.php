@@ -31,8 +31,8 @@ class BootstrapInstallation
                 'password' => Hash::make($data['password']),
                 'status' => 'active',
             ]);
-            $user->syncRoles(['admin']);
-            $smtp->store($data, $user);
+            $user->syncRoles(['admin', 'finance', 'hr']);
+            $smtp->claimBootstrapConfiguration($data, $user);
 
             $claim->forceFill([
                 'claimed_at' => now(),

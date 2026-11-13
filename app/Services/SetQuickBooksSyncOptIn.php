@@ -37,12 +37,6 @@ class SetQuickBooksSyncOptIn
                 return;
             }
 
-            if ($optedIn && $state->quickbooks_import_mode !== ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API) {
-                throw ValidationException::withMessages([
-                    'quickbooks_opt_in' => 'Select QuickBooks API as the Customer/Site source before opting into synchronization. A completed CSV import can switch sources with confirmation; its existing rows remain local-only.',
-                ]);
-            }
-
             if (! $optedIn && ($state->quickbooks_sync_enabled || $this->hasQuickBooksSetupWork())) {
                 throw ValidationException::withMessages([
                     'quickbooks_opt_in' => 'QuickBooks setup has already started. Pause synchronization instead; existing QuickBooks-linked records and setup history will be preserved.',

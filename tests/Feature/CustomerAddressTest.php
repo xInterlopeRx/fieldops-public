@@ -165,9 +165,13 @@ class CustomerAddressTest extends TestCase
             'source' => 'quickbooks',
             'first_name' => 'Second',
         ]);
+        $firstSite->forceFill(['primary_contact_id' => $firstContact->getKey()])->save();
+        $secondSite->forceFill(['primary_contact_id' => $secondContact->getKey()])->save();
 
         $this->assertSame($firstSite->id, $firstContact->site->id);
         $this->assertSame($secondSite->id, $secondContact->site->id);
+        $this->assertSame($firstContact->getKey(), $firstSite->fresh()->primaryContact->getKey());
+        $this->assertSame($secondContact->getKey(), $secondSite->fresh()->primaryContact->getKey());
         $this->assertCount(2, $customer->contacts);
     }
 }

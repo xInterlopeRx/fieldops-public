@@ -120,7 +120,7 @@ class AdminTimeTrackingDashboardTest extends TestCase
         $this->assertModelExists($oldDraft);
     }
 
-    public function test_dashboard_and_exceptions_are_admin_only(): void
+    public function test_basic_user_gets_read_only_team_timesheets_but_not_exceptions(): void
     {
         $this->get(route('admin.time-tracking.dashboard'))
             ->assertRedirect(route('login'));
@@ -129,7 +129,9 @@ class AdminTimeTrackingDashboardTest extends TestCase
 
         $this->actingAs($basic)
             ->get(route('admin.time-tracking.dashboard'))
-            ->assertForbidden();
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('Admin/TimeTracking/Team')
+                ->where('entries.total', 0));
 
         $this->get(route('admin.time-tracking.exceptions'))
             ->assertForbidden();

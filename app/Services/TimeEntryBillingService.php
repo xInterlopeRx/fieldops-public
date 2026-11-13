@@ -17,7 +17,7 @@ class TimeEntryBillingService
     public function bulkMarkInvoiced(User $actor, array $ids): void
     {
         DB::transaction(function () use ($actor, $ids): void {
-            Gate::forUser($actor)->authorize('reviewAny', TimeEntry::class);
+            Gate::forUser($actor)->authorize('manageBilling', TimeEntry::class);
             $entries = TimeEntry::query()
                 ->whereKey($ids)
                 ->orderBy('id')

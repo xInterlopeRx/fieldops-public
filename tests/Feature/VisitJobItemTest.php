@@ -218,7 +218,6 @@ class VisitJobItemTest extends TestCase
     private function connectQuickBooks(): IntegrationConnection
     {
         ApplicationSetupState::query()->whereKey(1)->update([
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API,
             'onboarding_required' => false,
         ]);
 

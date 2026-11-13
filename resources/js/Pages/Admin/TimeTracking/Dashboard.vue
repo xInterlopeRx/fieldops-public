@@ -78,7 +78,7 @@ const formatHours = (hours: number): string => hours.toFixed(4);
                     <p class="mt-1 text-sm text-gray-600">Open a time-entry work area.</p>
                 </div>
                 <nav aria-label="Time tracking quick links" class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <Link :href="route('admin.time-tracking.review')" class="fieldops-secondary-action flex min-h-12 items-center justify-between gap-3 px-4">
+                    <Link v-if="$page.props.auth.can_review_time_entries" :href="route('admin.time-tracking.review')" class="fieldops-secondary-action flex min-h-12 items-center justify-between gap-3 px-4">
                         <span>Review</span><span aria-hidden="true">→</span>
                     </Link>
                     <Link :href="route('admin.time-tracking.payroll')" class="fieldops-secondary-action flex min-h-12 items-center justify-between gap-3 px-4">

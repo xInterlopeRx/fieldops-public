@@ -4,11 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StoreCustomerRequest;
 use App\Http\Requests\UpdateCustomerRequest;
+use App\Models\Contact;
 use App\Models\Customer;
 use App\Models\Project;
+use App\Models\Site;
 use App\Models\Visit;
 use App\Models\WorkOrder;
+use App\Services\ActivityLogService;
 use App\Services\CustomerAddressBookService;
+use App\Services\ProjectNumberGenerator;
 use App\Services\QuickBooksCustomerSyncService;
 use App\Services\QuickBooksCustomerWriteService;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +27,7 @@ class CustomerController extends Controller
         $validated = $request->validate([
             'q' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', 'string', 'max:40'],
+            'type' => ['nullable', 'in:site'],
         ]);
         $term = trim($validated['q'] ?? '');
 
@@ -34,6 +39,42 @@ class CustomerController extends Controller
         $like = '%'.$normalizedTerm.'%';
         $prefix = $normalizedTerm.'%';
         $status = trim($validated['status'] ?? '');
+
+        if (($validated['type'] ?? null) === 'site') {
+            $sites = Site::query()
+                ->where(function ($query) use ($like) {
+                    $query->whereRaw('LOWER(name) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(company_name) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(address) LIKE ?', [$like])
+                        ->orWhereHas('customer', function ($customer) use ($like) {
+                            $customer->where(function ($details) use ($like) {
+                                $details->whereRaw('LOWER(name) LIKE ?', [$like])
+                                    ->orWhereRaw('LOWER(client_id) LIKE ?', [$like]);
+                            });
+                        });
+                })
+                ->with('customer:id,client_id,name')
+                ->orderByRaw(
+                    'CASE WHEN LOWER(name) = ? THEN 0 WHEN LOWER(name) LIKE ? THEN 1 ELSE 2 END',
+                    [$normalizedTerm, $prefix],
+                )
+                ->orderBy('name')
+                ->orderBy('id')
+                ->limit(8)
+                ->get(['id', 'customer_id', 'name', 'address'])
+                ->map(fn (Site $site): array => [
+                    'id' => $site->id,
+                    'parent_id' => $site->customer_id,
+                    'type' => 'site',
+                    'name' => $site->name,
+                    'reference' => $site->customer?->client_id,
+                    'detail' => collect([$site->customer?->name, $site->address])
+                        ->filter()
+                        ->implode(' · ') ?: null,
+                ]);
+
+            return response()->json(['data' => $sites]);
+        }
 
         $customers = Customer::query()
             ->where(function ($query) use ($like) {
@@ -256,7 +297,7 @@ class CustomerController extends Controller
         QuickBooksCustomerSyncService $quickBooksSync,
     ): JsonResponse {
         $refreshStatus = $quickBooksSync->requestRefresh($customer);
-        $customer->refresh()->load(['contacts', 'sites']);
+        $customer->refresh()->load(['contacts', 'sites.primaryContact']);
 
         return response()->json($this->customerResponse($customer, $refreshStatus, $addressBook));
     }
@@ -292,19 +333,41 @@ class CustomerController extends Controller
     public function store(
         StoreCustomerRequest $request,
         CustomerAddressBookService $addressBook,
+        ProjectNumberGenerator $projectNumbers,
         QuickBooksCustomerWriteService $quickBooksWrites,
-    ): RedirectResponse {
+        ActivityLogService $activityLog,
+    ): RedirectResponse|JsonResponse {
         $validated = $request->validated();
         $billingAddress = $validated['billing_address'] ?? [];
-        $shippingAddress = $validated['shipping_address'] ?? [];
+        $shippingAddress = ($validated['shipping_address_same_as_billing'] ?? false)
+            ? $billingAddress
+            : ($validated['shipping_address'] ?? []);
+        $siteDrafts = $validated['sites'] ?? [];
+        $projectDrafts = $validated['projects'] ?? [];
 
         if (($billingAddress['line1'] ?? null) === null && ! empty($validated['address'])) {
             $billingAddress['line1'] = $validated['address'];
         }
 
-        unset($validated['billing_address'], $validated['shipping_address']);
+        unset(
+            $validated['billing_address'],
+            $validated['shipping_address'],
+            $validated['shipping_address_same_as_billing'],
+            $validated['sites'],
+            $validated['projects'],
+        );
 
-        $customer = DB::transaction(function () use ($validated, $billingAddress, $shippingAddress, $addressBook): Customer {
+        $customer = DB::transaction(function () use (
+            $validated,
+            $billingAddress,
+            $shippingAddress,
+            $siteDrafts,
+            $projectDrafts,
+            $addressBook,
+            $projectNumbers,
+            $activityLog,
+            $request,
+        ): Customer {
             $lastClientId = Customer::query()
                 ->whereNotNull('client_id')
                 ->orderByDesc('id')
@@ -318,12 +381,70 @@ class CustomerController extends Controller
             ]);
             $addressBook->saveDefault($customer, 'billing', $billingAddress);
             $addressBook->saveDefault($customer, 'shipping', $shippingAddress);
+            $activityLog->record($customer, 'created', [], $request->user());
+
+            $hasPrimaryContactDetails = collect([
+                $customer->first_name,
+                $customer->last_name,
+                $customer->email,
+                $customer->phone,
+            ])->contains(fn (?string $value): bool => is_string($value) && trim($value) !== '');
+
+            $primaryContact = $hasPrimaryContactDetails
+                ? Contact::query()->create([
+                    'customer_id' => $customer->getKey(),
+                    'site_id' => null,
+                    'contact_type' => 'primary',
+                    'source' => 'manual',
+                    'first_name' => $customer->first_name,
+                    'last_name' => $customer->last_name,
+                    'email' => $customer->email,
+                    'phone' => $customer->phone,
+                ])
+                : null;
+
+            if ($primaryContact !== null) {
+                $activityLog->record($primaryContact, 'created', [], $request->user());
+            }
+
+            foreach ($siteDrafts as $siteData) {
+                $siteAddress = array_replace([
+                    'line1' => null,
+                    'line2' => null,
+                    'line3' => null,
+                    'line4' => null,
+                    'line5' => null,
+                    'city' => null,
+                    'country_subdivision_code' => null,
+                    'postal_code' => null,
+                    'country' => null,
+                ], $siteData['address']);
+                $site = $customer->sites()->create([
+                    'name' => $siteData['name'],
+                    'address' => $addressBook->formatAddressFields($siteAddress),
+                    'primary_contact_id' => $primaryContact?->getKey(),
+                    'metadata' => ['created_from' => 'client_form'],
+                ]);
+                $addressBook->saveSiteAddress($site, $siteAddress);
+                $activityLog->record($site, 'created', [], $request->user());
+            }
+
+            foreach ($projectDrafts as $projectData) {
+                $project = Project::query()->create([
+                    'customer_id' => $customer->getKey(),
+                    'name' => $projectData['name'],
+                    'project_number' => $projectData['project_number'] ?? null,
+                    'status' => 'created',
+                ]);
+                $projectNumbers->assign($project);
+                $activityLog->record($project, 'created', [], $request->user());
+            }
 
             return $customer;
         });
 
         $writeStatus = $quickBooksWrites->queueCustomer($customer, createIfUnlinked: true);
-        $message = "Client {$customer->client_id} created.";
+        $message = "Customer {$customer->client_id} created.";
 
         if ($writeStatus === 'pending') {
             $message .= ' QuickBooks create queued.';
@@ -333,6 +454,17 @@ class CustomerController extends Controller
             $message .= ' QuickBooks is not connected; this customer remains local.';
         } elseif ($writeStatus === 'failed') {
             $message .= ' The QuickBooks create could not be queued; contact an administrator.';
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'data' => [
+                    'id' => $customer->getKey(),
+                    'clientId' => $customer->client_id,
+                    'name' => $customer->name,
+                ],
+                'message' => $message,
+            ], 201);
         }
 
         return redirect()->route('calendar')->with('success', $message);

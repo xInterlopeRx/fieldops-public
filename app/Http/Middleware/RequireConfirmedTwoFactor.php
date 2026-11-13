@@ -61,7 +61,9 @@ class RequireConfirmedTwoFactor
         $request->session()->put([
             'login.id' => $userId,
             'login.remember' => false,
-            'url.intended' => route('calendar'),
+            'url.intended' => $request->routeIs('admin.admin-role-transfers.show')
+                ? $request->fullUrl()
+                : route('calendar'),
         ]);
 
         return to_route('two-factor.login')

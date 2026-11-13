@@ -3,7 +3,7 @@ import { onBeforeUnmount, ref, watch, type Ref } from "vue";
 export interface GlobalSearchResult {
     id: number;
     parent_id?: number;
-    type: "client" | "project" | "job" | "visit";
+    type: "client" | "site" | "project" | "job" | "visit";
     name: string;
     reference: string | null;
     detail: string | null;
@@ -39,8 +39,11 @@ export const useGlobalSearchAutocomplete = (
         requestController = controller;
 
         try {
+            const typeQuery = allowedTypes?.length === 1 && allowedTypes[0] === "site"
+                ? "&type=site"
+                : "";
             const response = await fetch(
-                `${route("global.search")}?q=${encodeURIComponent(term)}`,
+                `${route("global.search")}?q=${encodeURIComponent(term)}${typeQuery}`,
                 {
                     headers: { Accept: "application/json" },
                     signal: controller.signal,

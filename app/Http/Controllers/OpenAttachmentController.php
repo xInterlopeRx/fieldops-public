@@ -40,7 +40,7 @@ class OpenAttachmentController extends Controller
         $this->authorizeAttachment($request, $attachment);
 
         try {
-            $storage->metadata($attachment->sharepoint_item_id);
+            $storage->metadata($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id);
         } catch (MicrosoftGraphApiException $exception) {
             if ($exception->reason === 'graph_record_not_found' && $exception->httpStatus === 404) {
                 $this->removeMissingMetadata($request, $attachment, $attachmentLifecycle);
@@ -71,7 +71,7 @@ class OpenAttachmentController extends Controller
         }
 
         try {
-            $file = $storage->downloadWithMetadata($attachment->sharepoint_item_id);
+            $file = $storage->downloadWithMetadata($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id);
         } catch (MicrosoftGraphApiException $exception) {
             if ($exception->reason === 'graph_record_not_found' && $exception->httpStatus === 404) {
                 $this->removeMissingMetadata($request, $attachment, $attachmentLifecycle);
@@ -137,7 +137,7 @@ class OpenAttachmentController extends Controller
         }
 
         try {
-            $file = $storage->thumbnail($attachment->sharepoint_item_id);
+            $file = $storage->thumbnail($attachment->sharepoint_item_id, $attachment->sharepoint_drive_id);
         } catch (MicrosoftGraphApiException $exception) {
             if ($exception->reason === 'graph_record_not_found' && $exception->httpStatus === 404) {
                 $this->removeMissingMetadata($request, $attachment, $attachmentLifecycle);

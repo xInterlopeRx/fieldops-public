@@ -18,6 +18,7 @@ class BwsSecretReader
         'INTUIT_CLIENT_SECRET',
         'MICROSOFT_GRAPH_CLIENT_ID',
         'MICROSOFT_GRAPH_CLIENT_SECRET',
+        'FIELDPULSE_API_KEY',
     ];
 
     /**

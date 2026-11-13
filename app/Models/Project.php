@@ -16,7 +16,11 @@ class Project extends Model
         'status' => 'created',
     ];
 
-    protected $fillable = ['customer_id', 'project_number', 'name', 'notes', 'status'];
+    protected $fillable = ['customer_id', 'fieldpulse_id', 'project_number', 'name', 'notes', 'status', 'metadata'];
+
+    protected $casts = [
+        'metadata' => 'array',
+    ];
 
     public function customer(): BelongsTo
     {

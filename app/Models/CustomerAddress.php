@@ -17,6 +17,8 @@ class CustomerAddress extends Model
 
     public const SOURCE_CSV_IMPORT = 'csv_import';
 
+    public const SOURCE_FILE_IMPORT = 'file_import';
+
     public const SOURCE_SITE = 'site';
 
     public const SOURCE_MANUAL = 'manual';

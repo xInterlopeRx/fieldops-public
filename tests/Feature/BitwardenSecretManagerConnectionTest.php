@@ -2,7 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\ApplicationSetupState;
 use App\Models\BitwardenSecretManagerConnection;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -66,7 +65,7 @@ class BitwardenSecretManagerConnectionTest extends TestCase
         $this->assertFalse($connection->fresh()->isVerifiedForCurrentEnvironment());
     }
 
-    public function test_graph_only_bws_profile_is_accepted_for_csv_import_but_not_api_import(): void
+    public function test_graph_only_bws_profile_is_sufficient_for_graph_but_not_quickbooks(): void
     {
         config([
             'services.bitwarden.api_url' => 'https://api.bitwarden.com',
@@ -79,12 +78,11 @@ class BitwardenSecretManagerConnectionTest extends TestCase
             'runtime_access_token' => 'runtime-reader-token',
         ])->save();
 
-        $this->assertTrue($connection->fresh()->isVerifiedForImportMode(ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV));
-        $this->assertFalse($connection->fresh()->isVerifiedForImportMode(ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API));
-        $this->assertFalse($connection->fresh()->isVerifiedForImportMode('unsupported'));
+        $this->assertTrue($connection->fresh()->isVerifiedForGraph());
+        $this->assertFalse($connection->fresh()->isVerifiedForQuickBooksOptIn(true));
     }
 
-    public function test_all_required_bws_profile_is_accepted_for_api_import_mode(): void
+    public function test_all_required_bws_profile_is_sufficient_for_quickbooks(): void
     {
         config([
             'services.bitwarden.api_url' => 'https://api.bitwarden.com',
@@ -97,7 +95,8 @@ class BitwardenSecretManagerConnectionTest extends TestCase
             'runtime_access_token' => 'runtime-reader-token',
         ])->save();
 
-        $this->assertTrue($connection->fresh()->isVerifiedForImportMode(ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API));
+        $this->assertTrue($connection->fresh()->isVerifiedForQuickBooksOptIn(true));
+        $this->assertTrue($connection->fresh()->isVerifiedForGraph());
     }
 
     private function connection(): BitwardenSecretManagerConnection

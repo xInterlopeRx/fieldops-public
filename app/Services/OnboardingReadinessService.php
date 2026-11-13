@@ -18,6 +18,7 @@ use App\Models\QuickBooksInitialCustomerImport;
 use App\Models\QuickBooksItemCatalogSync;
 use App\Models\Site;
 use App\Models\User;
+use App\Services\FieldPulse\FieldPulseDocumentImportService;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -30,7 +31,7 @@ class OnboardingReadinessService
         private readonly QuickBooksInitialCustomerImportService $customerSiteImport,
         private readonly QuickBooksItemCatalogSyncService $itemCatalogSync,
         private readonly SyncHealthService $syncHealth,
-        private readonly SetCustomerImportMode $customerImportMode,
+        private readonly FieldPulseDocumentImportService $fieldPulseImport,
     ) {}
 
     /** @return array<string, mixed> */
@@ -38,20 +39,17 @@ class OnboardingReadinessService
     {
         $state = ApplicationSetupState::query()->whereKey(1)->firstOrFail();
         $storedSteps = ApplicationSetupStep::query()->get()->keyBy('step_key');
-        $importMode = $state->quickbooks_import_mode ?: ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API;
-        $csvImportMode = $importMode === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV;
         $quickBooksOptedIn = (bool) $state->quickbooks_sync_opted_in;
         $itemCatalog = $this->itemCatalogSync->snapshot();
+        $fieldPulseImport = $this->fieldPulseImport->currentRunSummary();
 
         if (! $state->onboarding_required) {
             return [
                 'required' => false,
                 'legacy' => true,
-                'customerImportMode' => $importMode,
                 'quickBooksOptedIn' => false,
                 'canOptInQuickBooks' => false,
                 'canOptOutQuickBooks' => false,
-                'canSelectCustomerImportMode' => false,
                 'ready' => true,
                 'invitationsUnlocked' => true,
                 'canComplete' => false,
@@ -63,7 +61,6 @@ class OnboardingReadinessService
                 'canPreviewItemCatalogImport' => false,
                 'canStartItemCatalogImport' => false,
                 'canResumeItemCatalogImport' => false,
-                'canStartCsvCustomerSiteImport' => false,
                 'canResumeCustomerSiteImport' => false,
                 'customerSiteImport' => [
                     'status' => 'pending',
@@ -104,41 +101,41 @@ class OnboardingReadinessService
 
         try {
             $quickBooksReady = $quickBooksOptedIn
-                && ! $csvImportMode
                 && $this->quickBooks->isConnectedForCurrentEnvironment();
         } catch (DecryptException) {
             $quickBooksReady = false;
         }
         $importStep = $storedSteps->get(ApplicationSetupStep::INITIAL_QBO_IMPORT);
         $quickBooksOAuthStep = $storedSteps->get(ApplicationSetupStep::QUICKBOOKS_OAUTH);
-        $quickBooksStepStatus = ! $quickBooksOptedIn || $csvImportMode
+        $quickBooksStepStatus = ! $quickBooksOptedIn
             ? ApplicationSetupStep::STATUS_NOT_REQUIRED
             : ($quickBooksReady
                 ? ApplicationSetupStep::STATUS_PASSED
                 : (in_array($quickBooksOAuthStep?->status, [ApplicationSetupStep::STATUS_FAILED, ApplicationSetupStep::STATUS_IN_PROGRESS], true)
                     ? $quickBooksOAuthStep->status
                     : ApplicationSetupStep::STATUS_PENDING));
-        $customerSiteImport = $this->customerSiteImport->snapshot(
-            $csvImportMode
-                ? QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD
-                : QuickBooksInitialCustomerImport::SOURCE_QUICKBOOKS_API,
-        );
+        $customerSiteImport = $this->customerSiteImport->snapshot(QuickBooksInitialCustomerImport::SOURCE_QUICKBOOKS_API);
+        $fieldPulseComplete = $fieldPulseImport !== null
+            && $fieldPulseImport['status'] === 'customer_site_complete'
+            && $fieldPulseImport['failure_count'] === 0;
+        $fieldPulseInProgress = $fieldPulseImport !== null
+            && ! $fieldPulseComplete
+            && in_array($fieldPulseImport['status'], ['in_progress', 'customer_site_complete'], true);
+        $sourceImportFailed = ($fieldPulseImport['status'] ?? null) === 'failed'
+            || $customerSiteImport['status'] === 'failed'
+            || $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_FAILED;
+        $quickBooksImportComplete = $customerSiteImport['status'] === 'complete'
+            && $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_COMPLETE;
+        $quickBooksImportInProgress = in_array($customerSiteImport['status'], ['in_progress', 'customer_site_complete'], true)
+            || $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_IN_PROGRESS;
         $initialImportStatus = match (true) {
-            $csvImportMode && $customerSiteImport['status'] === 'failed' => ApplicationSetupStep::STATUS_FAILED,
-            $csvImportMode && $customerSiteImport['status'] === QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE
-                && $customerSiteImport['failureCount'] === 0
-                && $importStep?->status === ApplicationSetupStep::STATUS_PASSED => ApplicationSetupStep::STATUS_PASSED,
-            $csvImportMode && $customerSiteImport['status'] === 'in_progress' => ApplicationSetupStep::STATUS_IN_PROGRESS,
-            $csvImportMode => ApplicationSetupStep::STATUS_PENDING,
-            ! $quickBooksOptedIn => ApplicationSetupStep::STATUS_NOT_REQUIRED,
-            $customerSiteImport['status'] === 'failed'
-                || $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_FAILED => ApplicationSetupStep::STATUS_FAILED,
+            $sourceImportFailed => ApplicationSetupStep::STATUS_FAILED,
             $importStep?->status === ApplicationSetupStep::STATUS_DEFERRED => ApplicationSetupStep::STATUS_DEFERRED,
-            $customerSiteImport['status'] === 'complete'
-                && $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_COMPLETE
-                && $importStep?->status === ApplicationSetupStep::STATUS_PASSED => ApplicationSetupStep::STATUS_PASSED,
-            in_array($customerSiteImport['status'], ['in_progress', 'customer_site_complete', 'complete'], true)
-                || $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_IN_PROGRESS => ApplicationSetupStep::STATUS_IN_PROGRESS,
+            $quickBooksOptedIn => $quickBooksImportComplete
+                ? ApplicationSetupStep::STATUS_PASSED
+                : ($quickBooksImportInProgress ? ApplicationSetupStep::STATUS_IN_PROGRESS : ApplicationSetupStep::STATUS_PENDING),
+            $fieldPulseComplete || $importStep?->status === ApplicationSetupStep::STATUS_PASSED => ApplicationSetupStep::STATUS_PASSED,
+            $fieldPulseInProgress => ApplicationSetupStep::STATUS_IN_PROGRESS,
             default => ApplicationSetupStep::STATUS_PENDING,
         };
         $bwsStep = $storedSteps->get(ApplicationSetupStep::BWS_RUNTIME_READER);
@@ -303,9 +300,7 @@ class OnboardingReadinessService
                 : ApplicationSetupStep::STATUS_PENDING);
         $quickBooksModeStepMessage = ! $quickBooksOptedIn
             ? 'QuickBooks sync was not selected. You can opt in later; Intuit credentials, company authorization, and initial imports will then be required.'
-            : ($csvImportMode
-                ? 'CSV import mode is local-only. QuickBooks API synchronization and write-back are disabled.'
-                : ($quickBooksReady ? null : 'Authorize the intended QuickBooks company for this environment.'));
+            : ($quickBooksReady ? null : 'Authorize the intended QuickBooks company for this environment.');
 
         $steps = [
             $this->stepPayload(
@@ -324,11 +319,9 @@ class OnboardingReadinessService
                     ? null
                     : ($bwsStepStatus === ApplicationSetupStep::STATUS_DEFERRED
                         ? 'BWS setup is paused. Invitations and Microsoft Graph remain locked until the selected credentials are verified.'
-                        : ($csvImportMode
-                            ? 'Configure a Can Read token and verify the two fixed Microsoft Graph secrets in this environment project.'
-                            : ($quickBooksOptedIn
-                                ? 'After opting in, configure or re-enter a Can Read token and verify all four fixed Intuit/Graph secrets in this environment project.'
-                                : 'Configure a Can Read token and verify the two fixed Microsoft Graph secrets. QuickBooks credentials are not required until you opt in.'))),
+                        : ($quickBooksOptedIn
+                            ? 'After opting in, configure or re-enter a Can Read token and verify all four fixed Intuit/Graph secrets in this environment project.'
+                            : 'Configure a Can Read token and verify the two fixed Microsoft Graph secrets. QuickBooks credentials are not required until you opt in.')),
             ),
             $this->stepPayload(
                 ApplicationSetupStep::QUICKBOOKS_OAUTH,
@@ -339,20 +332,12 @@ class OnboardingReadinessService
             ),
             $this->stepPayload(
                 ApplicationSetupStep::INITIAL_QBO_IMPORT,
-                $csvImportMode
-                    ? 'Initial Customer/Site CSV import'
-                    : 'Initial QuickBooks Customer/Site/Item import',
+                'Initial Customer/Site import',
                 $initialImportStatus,
                 $importStep,
-                $csvImportMode
-                    ? ($initialImportStatus === ApplicationSetupStep::STATUS_PASSED
-                        ? null
-                        : ($initialImportStatus === ApplicationSetupStep::STATUS_PENDING
-                            ? 'Preview and import Customer/Site data from CSV. This local-only import is separate from QuickBooks synchronization.'
-                            : $this->initialImportMessage($customerSiteImport, $itemCatalog, $initialImportStatus, $importStep, true)))
-                    : (! $quickBooksOptedIn
-                        ? 'QuickBooks Customer/Site and Item imports are optional and may be completed later by opting into QuickBooks sync.'
-                        : $this->initialImportMessage($customerSiteImport, $itemCatalog, $initialImportStatus, $importStep, false)),
+                $initialImportStatus === ApplicationSetupStep::STATUS_PASSED
+                    ? null
+                    : $this->initialImportMessage($customerSiteImport, $itemCatalog, $initialImportStatus, $importStep),
             ),
             $this->stepPayload(
                 ApplicationSetupStep::GRAPH_VALIDATION,
@@ -395,25 +380,18 @@ class OnboardingReadinessService
         $quickBooksOptedInAfterReceipt = $receiptExists
             && $state->quickbooks_sync_opted_in_at !== null
             && $state->quickbooks_sync_opted_in_at->greaterThan($state->readiness_completed_at);
-        $importReady = $csvImportMode
-            ? $initialImportStatus === ApplicationSetupStep::STATUS_PASSED
-            : (! $quickBooksOptedIn || $quickBooksOptedInAfterReceipt || (
-                $customerSiteImport['status'] === 'complete'
-                && $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_COMPLETE
-                && $importStep?->status === ApplicationSetupStep::STATUS_PASSED
-            ));
+        $importReady = $quickBooksOptedInAfterReceipt
+            || $initialImportStatus === ApplicationSetupStep::STATUS_PASSED;
         $invitationBwsReady = $quickBooksOptedInAfterReceipt ? $bwsGraphReady : $bwsReady;
         $invitationsUnlocked = $receiptExists && $invitationBwsReady && $importReady;
 
         return [
             'required' => true,
             'legacy' => false,
-            'customerImportMode' => $importMode,
             'quickBooksOptedIn' => $quickBooksOptedIn,
-            'canOptInQuickBooks' => ! $quickBooksOptedIn && ! $csvImportMode,
+            'canOptInQuickBooks' => ! $quickBooksOptedIn,
             'canOptOutQuickBooks' => $quickBooksOptedIn && ! $state->quickbooks_sync_enabled
                 && ! $this->hasQuickBooksSetupWork(),
-            'canSelectCustomerImportMode' => $this->customerImportMode->snapshot()['canChange'],
             'ready' => $ready,
             'invitationsUnlocked' => $invitationsUnlocked,
             'canComplete' => $ready && ! $receiptExists,
@@ -428,30 +406,23 @@ class OnboardingReadinessService
             'canResumeInitialImport' => $quickBooksOptedIn
                 && $importStep?->status === ApplicationSetupStep::STATUS_DEFERRED,
             'canStartCustomerSiteImport' => $quickBooksOptedIn && $bwsReady && $quickBooksReady
-                && ! $csvImportMode
                 && $customerSiteImport['status'] === 'pending'
                 && $importStep?->status !== ApplicationSetupStep::STATUS_DEFERRED,
             'canPreviewItemCatalogImport' => $quickBooksOptedIn && $bwsReady && $quickBooksReady
-                && ! $csvImportMode
                 && $customerSiteImport['status'] === QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE
                 && $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_PENDING
                 && $importStep?->status !== ApplicationSetupStep::STATUS_DEFERRED,
             'canStartItemCatalogImport' => $quickBooksOptedIn && $bwsReady && $quickBooksReady
-                && ! $csvImportMode
                 && $customerSiteImport['status'] === QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE
                 && $itemCatalog['status'] === QuickBooksItemCatalogSync::STATUS_PENDING
                 && $importStep?->status !== ApplicationSetupStep::STATUS_DEFERRED,
             'canResumeItemCatalogImport' => $quickBooksOptedIn && $bwsReady && $quickBooksReady
-                && ! $csvImportMode
                 && $customerSiteImport['status'] === QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE
                 && $itemCatalog['canResume'],
-            'canStartCsvCustomerSiteImport' => $csvImportMode && ! $quickBooksOptedIn
-                && $customerSiteImport['status'] === 'pending'
-                && $importStep?->status !== ApplicationSetupStep::STATUS_DEFERRED,
             'canResumeCustomerSiteImport' => ! $quickBooksOptedIn && $customerSiteImport['canResume']
-                && ($customerSiteImport['source'] === QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD
-                    || ($bwsReady && $quickBooksReady)),
+                && $bwsReady && $quickBooksReady,
             'customerSiteImport' => $customerSiteImport,
+            'fieldPulseImport' => $fieldPulseImport,
             'itemCatalog' => $itemCatalog,
             'graphTargetsConfigured' => $graphTargets !== null,
             'graphValidationStatus' => $graphTargets?->validation_status,
@@ -491,21 +462,10 @@ class OnboardingReadinessService
                 return false;
             }
 
-            if ($state->quickbooks_import_mode !== ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV) {
-                return true;
-            }
-
-            $csvImport = QuickBooksInitialCustomerImport::query()
-                ->where('environment', app()->environment())
-                ->where('source', QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD)
-                ->first();
-
-            return $csvImport?->status === QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE
-                && ! $csvImport->failures()->exists()
-                && ApplicationSetupStep::query()
-                    ->where('step_key', ApplicationSetupStep::INITIAL_QBO_IMPORT)
-                    ->where('status', ApplicationSetupStep::STATUS_PASSED)
-                    ->exists();
+            return ApplicationSetupStep::query()
+                ->where('step_key', ApplicationSetupStep::INITIAL_QBO_IMPORT)
+                ->where('status', ApplicationSetupStep::STATUS_PASSED)
+                ->exists();
         }
 
         if ($state->readiness_completed_at !== null
@@ -562,7 +522,6 @@ class OnboardingReadinessService
         array $itemCatalog,
         string $status,
         ?ApplicationSetupStep $step,
-        bool $csvMode,
     ): ?string {
         if ($status === ApplicationSetupStep::STATUS_PASSED) {
             return null;
@@ -585,24 +544,18 @@ class OnboardingReadinessService
         }
 
         if ($customerSiteImport['status'] === 'in_progress') {
-            return $customerSiteImport['source'] === QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD
-                ? 'CSV Customer/Site records are importing in resumable batches. QuickBooks Items are not required while QuickBooks sync is off.'
-                : 'Customer/Site records are importing in resumable batches.';
+            return 'Customer/Site records are importing in resumable batches.';
         }
 
         if ($customerSiteImport['status'] === QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE) {
-            return $csvMode
-                ? 'CSV Customer/Site import is complete. QuickBooks Items are not required while QuickBooks sync is off; the remaining setup readiness checks still apply.'
-                : 'Customer/Site import is complete. Preview and confirm the read-only QuickBooks Item catalog sync to continue.';
+            return 'Customer/Site import is complete. Preview and confirm the read-only QuickBooks Item catalog sync to continue.';
         }
 
         if ($customerSiteImport['status'] === 'complete') {
             return 'The import step is not recorded as passed. Reconcile setup status before recording readiness.';
         }
 
-        return $csvMode
-            ? 'Preview and import Customer/Site data from CSV. This local-only import is separate from QuickBooks synchronization; QuickBooks Items are not required while sync is off.'
-            : 'Preview and explicitly start the bounded QuickBooks Customer/Site import. The Item catalog sync follows after that phase.';
+        return 'Start the Customer/Site import from a supported source: the FieldPulse document, or the QuickBooks import when sync is opted in.';
     }
 
     public function finalizeGraphValidation(User $actor): void

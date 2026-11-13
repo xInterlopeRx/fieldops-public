@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\CustomerGroup;
+use App\Enums\CustomerStatus;
+use App\Enums\UsState;
 use App\Http\Requests\UpdateAdminCustomerWorkspaceRequest;
 use App\Models\AuditEvent;
 use App\Models\Contact;
@@ -24,6 +27,7 @@ use App\Services\AttachmentLifecycleService;
 use App\Services\AttachmentListService;
 use App\Services\ContactMethodService;
 use App\Services\CustomerAddressBookService;
+use App\Services\ProjectNumberGenerator;
 use App\Services\QuickBooksApiClient;
 use App\Services\QuickBooksCustomerSyncService;
 use App\Services\QuickBooksCustomerWriteService;
@@ -34,6 +38,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class AdminCustomerWorkspaceController extends Controller
@@ -41,13 +46,18 @@ class AdminCustomerWorkspaceController extends Controller
     public function show(
         Customer $customer,
         AttachmentListService $attachmentLists,
+        CustomerAddressBookService $addressBook,
         QuickBooksSyncControl $quickBooksSyncControl,
     ): JsonResponse {
         $sites = $customer->sites()
+            ->with([
+                'customerAddresses' => fn ($query) => $query->orderBy('id'),
+                'primaryContact',
+            ])
             ->orderBy('name')
             ->orderBy('id')
             ->limit(100)
-            ->get(['id', 'customer_id', 'name', 'address', 'quickbooks_write_request_id']);
+            ->get(['id', 'customer_id', 'name', 'address', 'primary_contact_id', 'quickbooks_write_request_id']);
         $contacts = $customer->contacts()
             ->with([
                 'site:id,name',
@@ -163,6 +173,7 @@ class AdminCustomerWorkspaceController extends Controller
             ->values();
         $customer->load(['defaultBillingAddress', 'assignedUsers.roles']);
         $address = $customer->defaultBillingAddress;
+        $shippingAddress = $addressBook->defaultsForForm($customer, 'shipping');
 
         return response()->json([
             'data' => [
@@ -171,17 +182,10 @@ class AdminCustomerWorkspaceController extends Controller
                     'clientId' => $customer->client_id,
                     'name' => $customer->name,
                     'companyName' => $customer->company_name,
-                    'firstName' => $customer->first_name,
-                    'middleName' => $customer->middle_name,
-                    'lastName' => $customer->last_name,
-                    'title' => $customer->title,
-                    'suffix' => $customer->suffix,
-                    'email' => $customer->email,
-                    'phone' => $customer->phone,
-                    'alternatePhone' => $customer->alternate_phone,
-                    'mobilePhone' => $customer->mobile_phone,
-                    'fax' => $customer->fax,
-                    'website' => $customer->website,
+                    'customerGroup' => $customer->customer_group,
+                    'customerStatus' => $customer->customer_status,
+                    'customerGroupOptions' => CustomerGroup::options(),
+                    'customerStatusOptions' => CustomerStatus::options(),
                     'notes' => $customer->notes,
                     'quickBooksSyncStatus' => $customer->quickbooks_sync_status,
                     'quickBooksSyncError' => $customer->quickbooks_sync_error,
@@ -194,12 +198,30 @@ class AdminCustomerWorkspaceController extends Controller
                     'line1', 'line2', 'line3', 'line4', 'line5', 'city',
                     'country_subdivision_code', 'postal_code', 'country',
                 ]) ?? ['line1' => $customer->address],
-                'sites' => $sites->map(fn (Site $site): array => [
-                    'id' => $site->id,
-                    'name' => $site->name,
-                    'address' => $site->address,
-                    'writePending' => $site->quickbooks_write_request_id !== null,
-                ])->values(),
+                'shippingAddress' => $shippingAddress,
+                'sites' => $sites->map(function (Site $site) use ($addressBook, $contacts): array {
+                    $primaryContact = $site->primaryContact ?? $contacts->first(
+                        fn (Contact $contact): bool => (int) $contact->site_id === (int) $site->getKey()
+                            && $contact->contact_type === 'primary',
+                    );
+
+                    return [
+                        'id' => $site->id,
+                        'name' => $site->name,
+                        'address' => $addressBook->siteAddressFields($site),
+                        'addressSummary' => $addressBook->siteAddressSummary($site),
+                        'primaryContactId' => $primaryContact?->getKey(),
+                        'primaryContactName' => $primaryContact === null
+                            ? null
+                            : trim(implode(' ', array_filter([
+                                $primaryContact->first_name,
+                                $primaryContact->middle_name,
+                                $primaryContact->last_name,
+                            ]))),
+                        'writePending' => $site->quickbooks_write_request_id !== null,
+                    ];
+                })->values(),
+                'stateOptions' => UsState::options(),
                 'contacts' => $contacts->map(fn (Contact $contact): array => [
                     'id' => $contact->id,
                     'siteId' => $contact->site_id,
@@ -272,6 +294,72 @@ class AdminCustomerWorkspaceController extends Controller
         ]);
     }
 
+    public function storeProject(
+        Request $request,
+        Customer $customer,
+        ActivityLogService $activityLog,
+        ProjectNumberGenerator $projectNumbers,
+    ): JsonResponse {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'project_number' => ['nullable', 'string', 'max:255', Rule::unique('projects', 'project_number')],
+            'site_ids' => ['sometimes', 'array', 'max:100'],
+            'site_ids.*' => ['required', 'integer', 'distinct', 'exists:sites,id'],
+            'new_site' => ['sometimes', 'array'],
+            'new_site.name' => ['required_with:new_site', 'string', 'max:255'],
+            'new_site.address' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $requestedSiteIds = $data['site_ids'] ?? [];
+        $siteIds = Site::query()
+            ->where('customer_id', $customer->getKey())
+            ->whereKey($requestedSiteIds)
+            ->pluck('id')
+            ->all();
+
+        if (count($siteIds) !== count($requestedSiteIds)) {
+            throw ValidationException::withMessages([
+                'site_ids' => ['Choose only Sites belonging to this Client.'],
+            ]);
+        }
+
+        [$project, $associatedSiteIds] = DB::transaction(function () use ($customer, $data, $siteIds, $activityLog, $projectNumbers, $request): array {
+            $associatedSiteIds = $siteIds;
+
+            if (isset($data['new_site'])) {
+                $site = $customer->sites()->create([
+                    'name' => $data['new_site']['name'],
+                    'address' => $data['new_site']['address'] ?? null,
+                    'metadata' => ['created_from' => 'project_form'],
+                ]);
+                $associatedSiteIds[] = $site->getKey();
+                $activityLog->record($site, 'created', [], $request->user());
+            }
+
+            $project = Project::query()->create([
+                'customer_id' => $customer->getKey(),
+                'name' => $data['name'],
+                'project_number' => $data['project_number'] ?? null,
+                'status' => 'created',
+            ]);
+            $projectNumbers->assign($project);
+            $project->sites()->sync($associatedSiteIds);
+            $activityLog->record($project, 'created', [], $request->user());
+
+            return [$project, $associatedSiteIds];
+        });
+
+        return response()->json([
+            'data' => [
+                'id' => $project->getKey(),
+                'number' => $project->project_number,
+                'name' => $project->name,
+                'status' => $project->status,
+                'jobsCount' => 0,
+                'siteIds' => $associatedSiteIds,
+            ],
+        ], 201);
+    }
+
     public function update(
         UpdateAdminCustomerWorkspaceRequest $request,
         Customer $customer,
@@ -291,25 +379,42 @@ class AdminCustomerWorkspaceController extends Controller
             ], 409);
         }
 
+        $billingAddressChanged = $request->billingAddressChanged();
+        $shippingAddressChanged = $request->shippingAddressChanged();
         $data = $request->validated();
         $actor = $request->user();
         $siteIdsToSync = [];
         $quickBooksFields = [];
 
-        DB::transaction(function () use ($customer, $data, $actor, $addressBook, $assignments, $archives, $contactMethods, &$siteIdsToSync, &$quickBooksFields): void {
+        DB::transaction(function () use ($customer, $data, $actor, $addressBook, $assignments, $archives, $contactMethods, $billingAddressChanged, $shippingAddressChanged, &$siteIdsToSync, &$quickBooksFields): void {
+            $sitesByRequestIndex = [];
+            $createdContactsByClientKey = [];
+
+            $hadCustomerPrimaryContact = Contact::query()
+                ->where('customer_id', $customer->getKey())
+                ->whereNull('site_id')
+                ->where('contact_type', 'primary')
+                ->lockForUpdate()
+                ->first() !== null;
             $customerFields = collect($data)->only([
-                'name', 'company_name', 'first_name', 'middle_name', 'last_name',
-                'title', 'suffix', 'email', 'phone', 'alternate_phone', 'mobile_phone', 'fax', 'website', 'notes',
+                'name', 'company_name', 'customer_group', 'customer_status', 'notes',
             ])->all();
             $customer->fill($customerFields);
-            $quickBooksFields = array_keys($customer->getDirty());
+            $quickBooksFields = array_values(array_intersect(
+                array_keys($customer->getDirty()),
+                ['name', 'company_name', 'notes'],
+            ));
             $customer->save();
 
-            if ($addressBook->saveDefault($customer, 'billing', $data['billing_address'])) {
+            if ($billingAddressChanged && $addressBook->saveDefault($customer, 'billing', $data['billing_address'])) {
                 $quickBooksFields[] = 'BillAddr';
             }
 
-            foreach ($data['sites'] as $siteData) {
+            if ($shippingAddressChanged && $addressBook->saveDefault($customer, 'shipping', $data['shipping_address'])) {
+                $quickBooksFields[] = 'ShipAddr';
+            }
+
+            foreach ($data['sites'] as $siteIndex => $siteData) {
                 $site = isset($siteData['id'])
                     ? $customer->sites()->whereKey($siteData['id'])->firstOrFail()
                     : new Site(['customer_id' => $customer->getKey()]);
@@ -318,15 +423,24 @@ class AdminCustomerWorkspaceController extends Controller
                     abort(409, 'A QuickBooks site write is pending. Wait for it to finish before editing that site.');
                 }
 
+                $siteAddress = $siteData['address'];
                 $site->fill([
                     'name' => $siteData['name'],
-                    'address' => $siteData['address'] ?? null,
+                    'address' => $addressBook->formatAddressFields($siteAddress),
                 ]);
+                $siteProfileChanged = ! $site->exists || $site->isDirty();
 
-                if ($site->isDirty()) {
+                if ($siteProfileChanged) {
                     $site->save();
+                }
+
+                $siteAddressChanged = $addressBook->saveSiteAddress($site, $siteAddress);
+
+                if ($siteProfileChanged || $siteAddressChanged) {
                     $siteIdsToSync[] = (int) $site->getKey();
                 }
+
+                $sitesByRequestIndex[$siteIndex] = $site;
             }
 
             $siteIds = $customer->sites()->pluck('id')->all();
@@ -342,9 +456,10 @@ class AdminCustomerWorkspaceController extends Controller
                     : new Contact(['customer_id' => $customer->getKey(), 'source' => 'manual']);
                 $remove = (bool) ($contactData['remove'] ?? false);
                 $methodData = $contactData['methods'] ?? null;
+                $clientKey = $contactData['client_key'] ?? null;
                 $originalContactType = $contact->contact_type;
                 $originalSiteId = $contact->site_id;
-                unset($contactData['id'], $contactData['remove'], $contactData['methods']);
+                unset($contactData['id'], $contactData['client_key'], $contactData['remove'], $contactData['methods']);
 
                 if ($contact->exists && $contact->source === 'quickbooks') {
                     $contact->fill($contactData);
@@ -386,15 +501,37 @@ class AdminCustomerWorkspaceController extends Controller
 
                 if ($remove) {
                     if ($contact->exists) {
+                        $referencingSites = Site::query()
+                            ->where('primary_contact_id', $contact->getKey())
+                            ->lockForUpdate()
+                            ->get(['id', 'primary_contact_id']);
+
+                        foreach ($referencingSites as $referencingSite) {
+                            $referencingSite->forceFill(['primary_contact_id' => null])->save();
+                            $siteIdsToSync[] = (int) $referencingSite->getKey();
+                        }
+
                         $archives->archive('contacts', $contact->getKey(), $actor, 'Removed from customer profile.');
                     }
 
                     continue;
                 }
 
+                $this->makeContactRoleAvailable(
+                    $customer,
+                    $contact,
+                    $contactData['contact_type'],
+                    isset($contactData['site_id']) ? (int) $contactData['site_id'] : null,
+                    $siteIdsToSync,
+                );
+
                 $contact->fill($contactData);
                 if ($contact->isDirty()) {
                     $contact->save();
+
+                    if ($originalSiteId !== null && $originalContactType === 'primary') {
+                        $siteIdsToSync[] = (int) $originalSiteId;
+                    }
 
                     if ($contact->site_id !== null && $contact->contact_type === 'primary') {
                         $siteIdsToSync[] = (int) $contact->site_id;
@@ -403,6 +540,73 @@ class AdminCustomerWorkspaceController extends Controller
 
                 if (is_array($methodData)) {
                     $contactMethods->sync($contact, $methodData);
+                }
+
+                if (is_string($clientKey) && $clientKey !== '') {
+                    $createdContactsByClientKey[$clientKey] = $contact;
+                }
+            }
+
+            foreach ($sitesByRequestIndex as $siteIndex => $site) {
+                $siteData = $data['sites'][$siteIndex];
+                $clientKey = $siteData['primary_contact_key'] ?? null;
+                $selectedContact = null;
+
+                if (is_string($clientKey) && $clientKey !== '') {
+                    $selectedContact = $createdContactsByClientKey[$clientKey] ?? null;
+                } elseif (isset($siteData['primary_contact_id'])) {
+                    $selectedContact = $customer->contacts()->whereKey($siteData['primary_contact_id'])->first();
+                }
+
+                if (($siteData['primary_contact_id'] ?? null) !== null && $selectedContact === null) {
+                    throw ValidationException::withMessages([
+                        "sites.{$siteIndex}.primary_contact_id" => 'The selected contact does not belong to this customer or is no longer available.',
+                    ]);
+                }
+
+                if ($selectedContact !== null && (int) $selectedContact->customer_id !== (int) $customer->getKey()) {
+                    throw ValidationException::withMessages([
+                        "sites.{$siteIndex}.primary_contact_id" => 'Choose a contact belonging to this Customer.',
+                    ]);
+                }
+
+                $primaryContactId = $selectedContact?->getKey();
+                $currentPrimaryContactId = $site->primary_contact_id === null
+                    ? null
+                    : (int) $site->primary_contact_id;
+                $nextPrimaryContactId = $primaryContactId === null ? null : (int) $primaryContactId;
+
+                if ($currentPrimaryContactId !== $nextPrimaryContactId) {
+                    $site->forceFill(['primary_contact_id' => $primaryContactId])->save();
+                    $siteIdsToSync[] = (int) $site->getKey();
+                }
+            }
+
+            $customerPrimaryContact = Contact::query()
+                ->where('customer_id', $customer->getKey())
+                ->whereNull('site_id')
+                ->where('contact_type', 'primary')
+                ->first();
+
+            if ($customerPrimaryContact !== null || $hadCustomerPrimaryContact) {
+                $customer->fill([
+                    'first_name' => $customerPrimaryContact?->first_name,
+                    'middle_name' => $customerPrimaryContact?->middle_name,
+                    'last_name' => $customerPrimaryContact?->last_name,
+                    'title' => $customerPrimaryContact?->title,
+                    'suffix' => $customerPrimaryContact?->suffix,
+                    'email' => $customerPrimaryContact?->email,
+                    'phone' => $customerPrimaryContact?->phone,
+                    'alternate_phone' => $customerPrimaryContact?->alternate_phone,
+                    'mobile_phone' => $customerPrimaryContact?->mobile_phone,
+                    'fax' => $customerPrimaryContact?->fax,
+                    'website' => $customerPrimaryContact?->website,
+                ]);
+                $primaryContactFields = array_keys($customer->getDirty());
+
+                if ($primaryContactFields !== []) {
+                    $customer->save();
+                    $quickBooksFields = array_values(array_unique([...$quickBooksFields, ...$primaryContactFields]));
                 }
             }
 
@@ -452,6 +656,51 @@ class AdminCustomerWorkspaceController extends Controller
             'quickBooksSiteStatuses' => $siteSyncStatuses,
             'quickBooksWarnings' => $quickBooksWarnings,
         ]);
+    }
+
+    /** @param list<int> $siteIdsToSync */
+    private function makeContactRoleAvailable(
+        Customer $customer,
+        Contact $contact,
+        string $contactType,
+        ?int $siteId,
+        array &$siteIdsToSync,
+    ): void {
+        if ($contactType === 'other') {
+            return;
+        }
+
+        $conflictQuery = Contact::query()
+            ->where('customer_id', $customer->getKey())
+            ->where('contact_type', $contactType);
+
+        if ($siteId === null) {
+            $conflictQuery->whereNull('site_id');
+        } else {
+            $conflictQuery->where('site_id', $siteId);
+        }
+
+        if ($contact->exists) {
+            $conflictQuery->whereKeyNot($contact->getKey());
+        }
+
+        $existingContact = $conflictQuery->lockForUpdate()->first();
+
+        if ($existingContact === null) {
+            return;
+        }
+
+        if ($existingContact->source === 'quickbooks') {
+            throw ValidationException::withMessages([
+                'contacts' => 'A QuickBooks-sourced contact role cannot be reassigned in FieldOps.',
+            ]);
+        }
+
+        $existingContact->forceFill(['contact_type' => 'other'])->save();
+
+        if ($existingContact->site_id !== null) {
+            $siteIdsToSync[] = (int) $existingContact->site_id;
+        }
     }
 
     public function resolveQuickBooksConflict(

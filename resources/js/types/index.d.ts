@@ -12,7 +12,14 @@ export type PageProps<
     auth: {
         user: User;
         is_admin: boolean;
+        has_admin_account_role: boolean;
+        can_manage_users: boolean;
+        can_manage_integrations: boolean;
         can_view_sync_logs: boolean;
+        can_view_time_tracking: boolean;
+        can_view_financial_time_entries: boolean;
+        can_view_time_entry_exceptions: boolean;
+        can_review_time_entries: boolean;
         onboarding_area_unlocked: boolean;
     };
     sync_health: {
@@ -39,6 +46,7 @@ export type PageProps<
         };
     } | null;
     work_order_default_status: string;
+    us_states: Array<{ value: string; label: string }>;
     smtp_plain_transport_allowed: boolean;
     work_order_statuses: Array<{
         value: string;

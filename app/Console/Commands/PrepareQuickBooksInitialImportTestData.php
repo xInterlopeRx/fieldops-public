@@ -8,25 +8,21 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use RuntimeException;
 
-#[Signature('quickbooks:prepare-initial-import-test-data {--source=quickbooks_api : Initial Customer/Site source (quickbooks_api or csv_upload)} {--dry-run : Show the local reset scope without changing records} {--force : Apply the local-only reset and reopen first-run onboarding}')]
-#[Description('Prepare the local PostgreSQL database for a clean QuickBooks initial-import test while preserving users and integrations.')]
+#[Signature('quickbooks:prepare-initial-import-test-data {--dry-run : Show the local reset scope without changing records} {--force : Apply the local-only reset and reopen first-run onboarding}')]
+#[Description('Prepare the local PostgreSQL database for a clean first-run Customer/Site import test while preserving users and integrations.')]
 class PrepareQuickBooksInitialImportTestData extends Command
 {
     public function handle(ResetLocalBusinessDataForQuickBooksImportTest $reset): int
     {
         try {
-            $source = (string) $this->option('source');
-            $preview = $reset->preview($source);
+            $preview = $reset->preview();
         } catch (RuntimeException $exception) {
             $this->components->error($exception->getMessage());
 
             return self::FAILURE;
         }
 
-        $target = $preview['importMode'] === 'csv_upload'
-            ? 'local PostgreSQL; local-only CSV import mode.'
-            : 'local PostgreSQL; QuickBooks sandbox.';
-        $this->components->info('Target: '.$target);
+        $this->components->info('Target: local PostgreSQL; first-run Customer/Site import.');
         $this->components->info("Preserved users: {$preview['usersPreserved']}; eligible Admin account: {$preview['adminAccountsPreserved']}; integration connections: {$preview['integrationConnectionsPreserved']}.");
         $this->line('Business and first-import test rows in scope:');
 
@@ -49,7 +45,7 @@ class PrepareQuickBooksInitialImportTestData extends Command
         }
 
         try {
-            $result = $reset->reset((string) $this->option('source'));
+            $result = $reset->reset();
         } catch (RuntimeException $exception) {
             $this->components->error($exception->getMessage());
 

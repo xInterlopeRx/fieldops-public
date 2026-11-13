@@ -18,6 +18,7 @@ class Customer extends Model
         'organization_id',
         'client_id',
         'source_customer_id',
+        'fieldpulse_id',
         'import_source',
         'quickbooks_id',
         'company_name',
@@ -61,6 +62,8 @@ class Customer extends Model
         'email',
         'phone',
         'address',
+        'customer_group',
+        'customer_status',
         'notes',
         'metadata',
     ];

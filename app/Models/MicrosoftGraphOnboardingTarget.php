@@ -27,12 +27,15 @@ class MicrosoftGraphOnboardingTarget extends Model
         'non_target_drive_id',
         'runtime_activated_at',
         'runtime_activated_by_user_id',
+        'business_attachments_writes_activated_at',
+        'business_attachments_writes_activated_by_user_id',
     ];
 
     protected $hidden = [
         'configured_by_user_id',
         'non_target_mailbox_id',
         'runtime_activated_by_user_id',
+        'business_attachments_writes_activated_by_user_id',
     ];
 
     protected function casts(): array
@@ -49,6 +52,7 @@ class MicrosoftGraphOnboardingTarget extends Model
             'contacts_boundary_validation_attempted_at' => 'datetime',
             'contacts_boundary_verified_at' => 'datetime',
             'runtime_activated_at' => 'datetime',
+            'business_attachments_writes_activated_at' => 'datetime',
         ];
     }
 

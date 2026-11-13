@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\UsState;
 use App\Http\Controllers\Controller;
 use App\Models\Visit;
 use Illuminate\Http\Request;
@@ -84,6 +85,7 @@ class OrganizationCalendarController extends Controller
 
         return Inertia::render('Calendar', [
             'initialData' => $visits,
+            'us_states' => UsState::options(),
         ]);
     }
 }

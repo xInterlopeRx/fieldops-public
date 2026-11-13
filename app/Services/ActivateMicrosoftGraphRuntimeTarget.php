@@ -17,7 +17,10 @@ use Illuminate\Validation\ValidationException;
 
 class ActivateMicrosoftGraphRuntimeTarget
 {
-    public function __construct(private readonly OnboardingReadinessService $readiness) {}
+    public function __construct(
+        private readonly OnboardingReadinessService $readiness,
+        private readonly SharePointAttachmentTargetResolver $sharePointTargets,
+    ) {}
 
     public function activate(User $actor): MicrosoftGraphOnboardingTarget
     {
@@ -70,6 +73,10 @@ class ActivateMicrosoftGraphRuntimeTarget
                 'runtime_activated_by_user_id' => $actor->getKey(),
             ])->save();
 
+            $businessAttachmentsWritesActivated = $this->sharePointTargets
+                ->activateBusinessAttachmentWritesIfReady($actor, $target);
+            $target->refresh();
+
             AuditEvent::query()->create([
                 'actor_user_id' => $actor->getKey(),
                 'subject_type' => $target->getMorphClass(),
@@ -90,6 +97,7 @@ class ActivateMicrosoftGraphRuntimeTarget
                         'sharepoint' => (bool) config('services.microsoft_graph.sharepoint_enabled'),
                         'onboarding' => (bool) config('services.microsoft_graph.onboarding_writes_enabled'),
                     ],
+                    'business_attachments_writes_activated' => $businessAttachmentsWritesActivated,
                 ],
                 'created_at' => now(),
             ]);

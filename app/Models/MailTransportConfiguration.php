@@ -19,6 +19,7 @@ class MailTransportConfiguration extends Model
         'from_name',
         'configured_by_user_id',
         'tested_at',
+        'tested_recipient',
     ];
 
     protected $hidden = [

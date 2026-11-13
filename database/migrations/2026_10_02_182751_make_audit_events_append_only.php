@@ -17,6 +17,9 @@ return new class extends Migration
         });
 
         if (DB::getDriverName() === 'pgsql') {
+            // migrate:fresh drops tables (and their triggers) but not
+            // functions, so guard the create to keep fresh runs repeatable.
+            DB::unprepared('DROP FUNCTION IF EXISTS reject_audit_event_mutation()');
             DB::unprepared(<<<'SQL'
                 CREATE FUNCTION reject_audit_event_mutation() RETURNS trigger AS $$
                 BEGIN

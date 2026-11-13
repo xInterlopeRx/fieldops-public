@@ -24,6 +24,8 @@ type GraphTargets = {
     non_target_site_id: string | null;
     non_target_drive_id: string | null;
     runtimeActivatedAt: string | null;
+    businessAttachmentsWritesActivatedAt: string | null;
+    businessAttachmentsWritesEnabled: boolean;
     configuredAt: string | null;
     validationStatus: string;
     lastValidationAttemptedAt: string | null;
@@ -813,7 +815,12 @@ Disconnect-MgGraph</code></pre>
                 <p v-if="target.lastValidationAttemptedAt">Last validation attempt: {{ target.lastValidationAttemptedAt }}</p>
                 <p v-if="target.readAccessVerifiedAt">Read-only metadata verified: {{ target.readAccessVerifiedAt }} · {{ target.readAccessCheckCount }} target checks</p>
                 <p v-if="target.lastErrorCode" class="font-mono text-red-700 dark:text-red-300">{{ target.lastErrorCode }}</p>
-                <p class="text-gray-600 dark:text-gray-400">These onboarding values are stored separately; current Graph consumers still use deployment configuration until a separate explicit activation gate is implemented.</p>
+                <p v-if="target.businessAttachmentsWritesEnabled" class="font-semibold text-green-800 dark:text-green-200">
+                    Business Attachments uploads are enabled for the verified target since {{ target.businessAttachmentsWritesActivatedAt }}.
+                </p>
+                <p v-else class="text-gray-600 dark:text-gray-400">
+                    Business Attachments uploads remain off until target verification, permission evidence, canary cleanup, and attachment migration are complete. FieldOps enables them automatically after reconciliation; repository Markdown stays on Work Schedules. Mail, Calendar, and Outlook Contacts have separate write controls.
+                </p>
             </section>
 
             <section v-if="target" class="grid gap-4 rounded-md border p-5" :class="sectionPanels[preflightState]">
@@ -1509,16 +1516,16 @@ Disconnect-MgGraph</code></pre>
                 <div class="grid gap-2">
                     <h2 class="font-semibold text-gray-900 dark:text-gray-100">Activate the shared-mailbox runtime target</h2>
                     <p class="text-sm leading-6 text-gray-700 dark:text-gray-300">
-                        Activation changes which mailbox runtime mail, Visit-calendar, and Outlook Contact consumers resolve. It does not enable those features or send requests; the separate deployment write flags remain authoritative. The selected target and user-mailbox control must have current readiness and M365-admin evidence.
+                        Activation changes which mailbox runtime mail, Visit-calendar, and Outlook Contact consumers resolve. It does not enable those features or send requests; their separate write controls remain off. Business Attachments writes use a separate readiness gate and activate automatically only after target verification and attachment reconciliation. The selected target and user-mailbox control must have current readiness and M365-admin evidence.
                     </p>
                     <p v-if="target.runtimeActivatedAt" class="text-sm font-semibold text-green-900 dark:text-green-200" role="status">
-                        This shared mailbox was activated for runtime resolution at {{ target.runtimeActivatedAt }}. Graph operations remain off until their feature flags are enabled.
+                        This shared mailbox was activated for runtime resolution at {{ target.runtimeActivatedAt }}. Mail, Calendar, and Outlook Contact writes remain off until separately enabled.
                     </p>
                 </div>
                 <form v-if="canActivateGraphRuntime" class="grid gap-4 sm:max-w-xl" @submit.prevent="activateRuntimeTarget">
                     <label class="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
                         <input v-model="activateRuntimeTargetForm.confirm_activate_runtime" type="checkbox" required class="mt-1 rounded border-gray-300 text-violet-700 focus:ring-violet-700" />
-                        <span>I reviewed the exact shared-mailbox target and user-mailbox denial control. Activate this mailbox for runtime resolution; do not enable any Graph write flags.</span>
+                        <span>I reviewed the exact shared-mailbox target and user-mailbox denial control. Activate this mailbox for runtime resolution; Mail, Calendar, and Outlook Contact writes remain separate.</span>
                     </label>
                     <div>
                         <InputLabel for="activate-runtime-target-password" value="Current password" />

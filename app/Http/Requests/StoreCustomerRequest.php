@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\UsState;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreCustomerRequest extends FormRequest
 {
@@ -30,6 +32,7 @@ class StoreCustomerRequest extends FormRequest
             'phone' => ['nullable', 'string', 'max:30'],
             'address' => ['nullable', 'string', 'max:1000'],
             'notes' => ['nullable', 'string', 'max:2000'],
+            'shipping_address_same_as_billing' => ['sometimes', 'boolean'],
             'billing_address' => ['nullable', 'array'],
             'billing_address.line1' => ['nullable', 'string', 'max:500'],
             'billing_address.line2' => ['nullable', 'string', 'max:500'],
@@ -50,6 +53,21 @@ class StoreCustomerRequest extends FormRequest
             'shipping_address.country_subdivision_code' => ['nullable', 'string', 'max:255'],
             'shipping_address.postal_code' => ['nullable', 'string', 'max:64'],
             'shipping_address.country' => ['nullable', 'string', 'max:100'],
+            'sites' => ['sometimes', 'array', 'max:20'],
+            'sites.*.name' => ['required', 'string', 'max:255'],
+            'sites.*.address' => ['required', 'array'],
+            'sites.*.address.line1' => ['nullable', 'string', 'max:500'],
+            'sites.*.address.line2' => ['nullable', 'string', 'max:500'],
+            'sites.*.address.line3' => ['nullable', 'string', 'max:500'],
+            'sites.*.address.line4' => ['nullable', 'string', 'max:500'],
+            'sites.*.address.line5' => ['nullable', 'string', 'max:500'],
+            'sites.*.address.city' => ['nullable', 'string', 'max:255'],
+            'sites.*.address.country_subdivision_code' => ['nullable', Rule::enum(UsState::class)],
+            'sites.*.address.postal_code' => ['nullable', 'string', 'max:64'],
+            'sites.*.address.country' => ['nullable', 'string', 'max:100'],
+            'projects' => ['sometimes', 'array', 'max:20'],
+            'projects.*.name' => ['required', 'string', 'max:255'],
+            'projects.*.project_number' => ['nullable', 'string', 'max:255', Rule::unique('projects', 'project_number')],
         ];
     }
 }

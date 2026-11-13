@@ -10,6 +10,7 @@ use App\Models\Contact;
 use App\Models\Customer;
 use App\Models\CustomerAddress;
 use App\Models\IntegrationConnection;
+use App\Models\Project;
 use App\Models\Site;
 use App\Models\User;
 use App\Services\QuickBooksCustomerWriteService;
@@ -99,6 +100,36 @@ class QuickBooksCustomerWriteTest extends TestCase
             && $request['ShipAddr']['Line1'] === '200 Demo Road');
     }
 
+    public function test_json_customer_create_returns_the_created_customer_for_an_in_page_form(): void
+    {
+        $this->configureSandbox();
+        $this->connectQuickBooks();
+        Queue::fake([PushQuickBooksCustomer::class]);
+        $user = $this->user();
+
+        $response = $this->actingAs($user)
+            ->postJson(route('customers.store'), [
+                'name' => 'In-page Customer Create',
+                'first_name' => 'Alex',
+                'email' => 'alex@example.test',
+                'billing_address' => ['line1' => '100 Test Street'],
+                'projects' => [['name' => 'Customer Create Project Draft']],
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'In-page Customer Create')
+            ->assertJsonPath('data.clientId', 'C01001')
+            ->assertJsonPath('message', 'Customer C01001 created. QuickBooks create queued.');
+
+        $customerId = (int) $response->json('data.id');
+        $this->assertDatabaseHas('customers', [
+            'id' => $customerId,
+            'name' => 'In-page Customer Create',
+        ]);
+        $project = Project::query()->where('name', 'Customer Create Project Draft')->sole();
+        $this->assertSame('P'.str_pad((string) $project->getKey(), 5, '0', STR_PAD_LEFT), $project->project_number);
+        Queue::assertPushed(PushQuickBooksCustomer::class, fn (PushQuickBooksCustomer $job): bool => $job->customerId === $customerId);
+    }
+
     public function test_creating_a_customer_queues_an_idempotent_sandbox_write_with_default_addresses(): void
     {
         $this->configureSandbox();
@@ -150,6 +181,147 @@ class QuickBooksCustomerWriteTest extends TestCase
         ]);
         Queue::assertPushed(PushQuickBooksCustomer::class, fn (PushQuickBooksCustomer $job): bool => $job->customerId === $customer->id
             && $job->requestId === $customer->quickbooks_write_request_id);
+    }
+
+    public function test_new_client_card_creates_primary_contact_sites_and_projects(): void
+    {
+        $this->configureSandbox();
+        $this->connectQuickBooks();
+        Http::preventStrayRequests();
+        Http::fake([
+            'sandbox-quickbooks.api.intuit.com/v3/company/sandbox-realm-123/customer*' => Http::response([
+                'Customer' => [
+                    'Id' => '970',
+                    'SyncToken' => '0',
+                    'DisplayName' => 'Compact Client Card Customer',
+                    'GivenName' => 'Casey',
+                    'FamilyName' => 'Client',
+                    'PrimaryEmailAddr' => ['Address' => 'casey@example.test'],
+                    'PrimaryPhone' => ['FreeFormNumber' => '555-0200'],
+                    'Job' => false,
+                    'Active' => true,
+                    'FullyQualifiedName' => 'Compact Client Card Customer',
+                ],
+            ]),
+        ]);
+        Queue::fake([PushQuickBooksCustomer::class, PushQuickBooksSite::class]);
+        $user = $this->user();
+
+        $this->actingAs($user)
+            ->post(route('customers.store'), [
+                'name' => 'Compact Client Card Customer',
+                'first_name' => 'Casey',
+                'last_name' => 'Client',
+                'email' => 'casey@example.test',
+                'phone' => '555-0200',
+                'billing_address' => [
+                    'line1' => '10 Billing Road',
+                    'line2' => 'Suite 2',
+                    'city' => 'Austin',
+                    'country_subdivision_code' => 'TX',
+                    'postal_code' => '78701',
+                    'country' => 'US',
+                ],
+                'shipping_address_same_as_billing' => true,
+                'shipping_address' => [
+                    'line1' => 'This address is intentionally ignored',
+                ],
+                'sites' => [
+                    [
+                        'name' => 'Billing Site',
+                        'address' => [
+                            'line1' => '10 Billing Road',
+                            'line2' => 'Suite 2',
+                            'city' => 'Austin',
+                            'country_subdivision_code' => 'TX',
+                            'postal_code' => '78701',
+                            'country' => 'US',
+                        ],
+                    ],
+                    [
+                        'name' => 'Shipping Site',
+                        'address' => [
+                            'line1' => '10 Billing Road',
+                            'line2' => 'Suite 2',
+                            'city' => 'Austin',
+                            'country_subdivision_code' => 'TX',
+                            'postal_code' => '78701',
+                            'country' => 'US',
+                        ],
+                    ],
+                ],
+                'projects' => [
+                    ['name' => 'Client Card Project', 'project_number' => 'CC-100'],
+                ],
+            ])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('calendar'));
+
+        $customer = Customer::query()->where('name', 'Compact Client Card Customer')->sole();
+        $contact = $customer->contacts()->where('contact_type', 'primary')->sole();
+        $sites = $customer->sites()->orderBy('id')->get();
+        $project = Project::query()->where('project_number', 'CC-100')->sole();
+
+        $this->assertSame('Casey Client', trim($contact->first_name.' '.$contact->last_name));
+        $this->assertSame('casey@example.test', $contact->email);
+        $this->assertSame('555-0200', $contact->phone);
+        $this->assertSame(2, $sites->count());
+        $this->assertSame($contact->getKey(), $sites[0]->primary_contact_id);
+        $this->assertSame($contact->getKey(), $sites[1]->primary_contact_id);
+        $this->assertSame('10 Billing Road', $sites[0]->customerAddresses()->where('address_type', CustomerAddress::TYPE_SHIPPING)->value('line1'));
+        $this->assertSame('10 Billing Road', $customer->defaultBillingAddress()->value('line1'));
+        $this->assertSame('10 Billing Road', $customer->defaultShippingAddress()->value('line1'));
+        $this->assertSame($customer->getKey(), $project->customer_id);
+        $this->assertSame('created', $project->status);
+        $this->assertDatabaseHas('audit_events', [
+            'subject_type' => $customer->getMorphClass(),
+            'subject_id' => $customer->getKey(),
+            'event' => 'created',
+        ]);
+        $this->assertDatabaseHas('audit_events', [
+            'subject_type' => $sites[0]->getMorphClass(),
+            'subject_id' => $sites[0]->getKey(),
+            'event' => 'created',
+        ]);
+        $this->assertDatabaseHas('audit_events', [
+            'subject_type' => $project->getMorphClass(),
+            'subject_id' => $project->getKey(),
+            'event' => 'created',
+        ]);
+
+        Queue::assertPushed(PushQuickBooksCustomer::class, fn (PushQuickBooksCustomer $job): bool => $job->customerId === $customer->getKey());
+        Queue::assertNotPushed(PushQuickBooksSite::class);
+
+        (new PushQuickBooksCustomer(
+            $customer->getKey(),
+            $customer->quickbooks_write_request_id,
+        ))->handle(app(QuickBooksCustomerWriteService::class));
+
+        $customer->refresh();
+        $sites->each->refresh();
+        $this->assertSame('970', $customer->quickbooks_id);
+        $this->assertSame(2, $sites->filter(fn (Site $site): bool => $site->quickbooks_write_request_id !== null)->count());
+        Queue::assertPushed(PushQuickBooksSite::class, fn (PushQuickBooksSite $job): bool => $job->siteId === $sites[0]->getKey());
+        Queue::assertPushed(PushQuickBooksSite::class, fn (PushQuickBooksSite $job): bool => $job->siteId === $sites[1]->getKey());
+    }
+
+    public function test_new_client_card_rejects_site_states_outside_the_state_options(): void
+    {
+        $this->actingAs($this->user())
+            ->from('/calendar')
+            ->post(route('customers.store'), [
+                'name' => 'Invalid Site State Customer',
+                'sites' => [[
+                    'name' => 'Invalid State Site',
+                    'address' => [
+                        'country_subdivision_code' => 'ZZ',
+                    ],
+                ]],
+            ])
+            ->assertSessionHasErrors('sites.0.address.country_subdivision_code');
+
+        $this->assertDatabaseMissing('customers', ['name' => 'Invalid Site State Customer']);
+        $this->assertDatabaseCount('sites', 0);
     }
 
     public function test_work_order_site_created_for_a_linked_customer_queues_a_qbo_child_write(): void
@@ -665,6 +837,100 @@ class QuickBooksCustomerWriteTest extends TestCase
             && ! isset($request['PreferredDeliveryMethod'])
             && ! isset($request['PrintOnCheckName'])
             && ! isset($request['BillAddr']));
+    }
+
+    public function test_linked_site_write_uses_a_customer_wide_primary_contact_and_structured_address(): void
+    {
+        $this->configureSandbox();
+        $this->connectQuickBooks();
+        Http::preventStrayRequests();
+        Http::fake([
+            'sandbox-quickbooks.api.intuit.com/v3/company/sandbox-realm-123/customer/101' => Http::response([
+                'Customer' => [
+                    'Id' => '101',
+                    'SyncToken' => '2',
+                    'ParentRef' => ['value' => '100'],
+                    'Job' => true,
+                ],
+            ]),
+            'sandbox-quickbooks.api.intuit.com/v3/company/sandbox-realm-123/customer*' => Http::response([
+                'Customer' => [
+                    'Id' => '101',
+                    'SyncToken' => '3',
+                    'DisplayName' => 'Main Office',
+                    'ParentRef' => ['value' => '100'],
+                    'Job' => true,
+                    'Active' => true,
+                    'ShipAddr' => [
+                        'Id' => '202',
+                        'Line1' => '200 Demo Road',
+                        'Line2' => 'Suite 4',
+                        'City' => 'Austin',
+                        'CountrySubDivisionCode' => 'TX',
+                        'PostalCode' => '78701',
+                        'Country' => 'US',
+                    ],
+                    'GivenName' => 'Site',
+                    'FamilyName' => 'Contact',
+                    'PrimaryEmailAddr' => ['Address' => 'site-contact@example.test'],
+                    'PrimaryPhone' => ['FreeFormNumber' => '555-0109'],
+                ],
+            ]),
+        ]);
+        $customer = Customer::create([
+            'name' => 'Parent Customer',
+            'quickbooks_id' => '100',
+            'quickbooks_sync_status' => 'pending',
+        ]);
+        $site = $customer->sites()->create([
+            'name' => 'Main Office',
+            'address' => '200 Demo Road, Suite 4, Austin TX 78701, US',
+            'quickbooks_id' => '101',
+            'quickbooks_sync_token' => '2',
+            'quickbooks_parent_id' => '100',
+            'quickbooks_write_request_id' => 'site-shared-contact-write-101',
+        ]);
+        $contact = $customer->contacts()->create([
+            'contact_type' => 'other',
+            'source' => 'manual',
+            'first_name' => 'Site',
+            'last_name' => 'Contact',
+            'email' => 'site-contact@example.test',
+            'phone' => '555-0109',
+        ]);
+        $site->customerAddresses()->create([
+            'customer_id' => $customer->getKey(),
+            'source' => CustomerAddress::SOURCE_SITE,
+            'address_type' => CustomerAddress::TYPE_SHIPPING,
+            'quickbooks_address_id' => '202',
+            'line1' => '200 Demo Road',
+            'line2' => 'Suite 4',
+            'city' => 'Austin',
+            'country_subdivision_code' => 'TX',
+            'postal_code' => '78701',
+            'country' => 'US',
+        ]);
+        $site->forceFill(['primary_contact_id' => $contact->getKey()])->save();
+
+        (new PushQuickBooksSite($site->getKey(), 'site-shared-contact-write-101'))
+            ->handle(app(QuickBooksCustomerWriteService::class));
+
+        $contact->refresh();
+        $site->refresh();
+        $this->assertSame('manual', $contact->source);
+        $this->assertNull($contact->site_id);
+        $this->assertSame($contact->getKey(), $site->primary_contact_id);
+        $this->assertSame('site-contact@example.test', $contact->email);
+        Http::assertSent(fn (HttpRequest $request): bool => $request->method() === 'POST'
+            && str_contains($request->url(), '/customer?requestid=site-shared-contact-write-101')
+            && $request['ShipAddr']['Line1'] === '200 Demo Road'
+            && $request['ShipAddr']['Line2'] === 'Suite 4'
+            && $request['ShipAddr']['City'] === 'Austin'
+            && $request['ShipAddr']['CountrySubDivisionCode'] === 'TX'
+            && $request['ShipAddr']['PostalCode'] === '78701'
+            && $request['ShipAddr']['Id'] === '202'
+            && $request['GivenName'] === 'Site'
+            && $request['PrimaryEmailAddr']['Address'] === 'site-contact@example.test');
     }
 
     private function configureSandbox(): void

@@ -9,6 +9,21 @@ export default {
         './resources/js/**/*.vue',
     ],
 
+    safelist: [
+        'fieldops-status-badge--success',
+        'fieldops-status-badge--warning',
+        'fieldops-status-badge--danger',
+        'fieldops-status-badge--archive',
+        'fieldops-status-badge--primary',
+        'fieldops-status-badge--gray',
+        'fieldops-status-badge--blue',
+        'fieldops-status-badge--purple',
+        'fieldops-status-badge--orange',
+        'fieldops-status-badge--green',
+        'fieldops-status-badge--red',
+        'fieldops-status-badge--magenta',
+    ],
+
     theme: {
         extend: {
             fontFamily: {

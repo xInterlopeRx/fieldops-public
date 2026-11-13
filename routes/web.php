@@ -3,6 +3,7 @@
 use App\Http\Controllers\AdminArchiveController;
 use App\Http\Controllers\AdminCustomerController;
 use App\Http\Controllers\AdminCustomerWorkspaceController;
+use App\Http\Controllers\AdminFieldPulseImportController;
 use App\Http\Controllers\AdminJobController;
 use App\Http\Controllers\AdminJobWorkspaceController;
 use App\Http\Controllers\AdminOnboardingAreaAccessController;
@@ -10,6 +11,7 @@ use App\Http\Controllers\AdminOnboardingController;
 use App\Http\Controllers\AdminPayrollController;
 use App\Http\Controllers\AdminProjectController;
 use App\Http\Controllers\AdminProjectWorkspaceController;
+use App\Http\Controllers\AdminRoleTransferController;
 use App\Http\Controllers\AdminSyncLogController;
 use App\Http\Controllers\AdminTimeEntryBillingController;
 use App\Http\Controllers\AdminTimeEntryReviewController;
@@ -68,6 +70,9 @@ Route::post('/setup/microsoft-graph/linkback/{challenge}', [GraphOnboardingLinkb
 Route::middleware('guest')->group(function (): void {
     Route::get('/bootstrap', [InstallationBootstrapController::class, 'create'])
         ->name('installation.bootstrap.create');
+    Route::post('/bootstrap/smtp-test', [InstallationBootstrapController::class, 'testSmtp'])
+        ->middleware('throttle:3,1')
+        ->name('installation.bootstrap.smtp-test');
     Route::post('/bootstrap', [InstallationBootstrapController::class, 'store'])
         ->middleware('throttle:5,1')
         ->name('installation.bootstrap.store');
@@ -99,12 +104,22 @@ Route::middleware(['auth', 'verified', RequireConfirmedTwoFactor::class, 'can:wo
         ->middleware('throttle:30,1')
         ->name('visits.items.destroy');
 
+    Route::get('/admin/time-tracking', [AdminTimeTrackingController::class, 'dashboard'])
+        ->middleware('can:work_orders.view')
+        ->name('admin.time-tracking.dashboard');
+    Route::get('/admin/admin-role-transfers/{adminRoleTransfer}', [AdminRoleTransferController::class, 'show'])
+        ->name('admin.admin-role-transfers.show');
+    Route::post('/admin/admin-role-transfers/{adminRoleTransfer}/accept', [AdminRoleTransferController::class, 'accept'])
+        ->name('admin.admin-role-transfers.accept');
+    Route::post('/admin/users/{target}/admin-role-transfer', [AdminRoleTransferController::class, 'store'])
+        ->name('admin.users.admin-transfer.store');
+
     Route::middleware(EnsureAdmin::class)->group(function () {
         Route::get('/admin', fn () => Inertia::render('Admin/Home'))->name('admin.home');
+        Route::get('/admin/admin-role-transfer', [AdminRoleTransferController::class, 'create'])
+            ->name('admin.admin-role-transfers.create');
         Route::get('/admin/time-tracking/review', [AdminTimeEntryReviewController::class, 'index'])
             ->name('admin.time-tracking.review');
-        Route::get('/admin/time-tracking', [AdminTimeTrackingController::class, 'dashboard'])
-            ->name('admin.time-tracking.dashboard');
         Route::get('/admin/time-tracking/exceptions', [AdminTimeTrackingController::class, 'exceptions'])
             ->name('admin.time-tracking.exceptions');
         Route::get('/admin/time-tracking/billing', [AdminTimeEntryBillingController::class, 'index'])
@@ -155,7 +170,7 @@ Route::middleware(['auth', 'verified', RequireConfirmedTwoFactor::class, 'can:wo
             ->name('admin.visits.workspace.update');
         Route::get('/admin/archive', [AdminArchiveController::class, 'page'])->name('admin.archive');
         Route::get('/admin/sync-logs', [AdminSyncLogController::class, 'index'])
-            ->middleware('can:integrations.manage')
+            ->middleware('can:integrations.view_logs')
             ->name('admin.sync-logs');
         Route::post('/admin/sync-logs/sharepoint-pointers/retire', [AdminSyncLogController::class, 'retireSharePointPointers'])
             ->middleware('can:integrations.manage')
@@ -204,19 +219,16 @@ Route::middleware(['auth', 'verified', RequireConfirmedTwoFactor::class, 'can:wo
             ->name('admin.onboarding.access.unlock');
         Route::middleware(RequireAdminOnboardingAreaAccess::class)->group(function (): void {
             Route::get('/admin/onboarding', [AdminOnboardingController::class, 'show'])
-                ->middleware('can:users.manage')
+                ->middleware('can:integrations.manage')
                 ->name('admin.onboarding');
-            Route::put('/admin/onboarding/customer-import-mode', [AdminOnboardingController::class, 'setCustomerImportMode'])
-                ->middleware(['can:integrations.manage', 'throttle:5,1'])
-                ->name('admin.onboarding.customer-import-mode.update');
             Route::put('/admin/onboarding/quickbooks-opt-in', [AdminOnboardingController::class, 'setQuickBooksSyncOptIn'])
                 ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.quickbooks-opt-in.update');
             Route::post('/admin/onboarding/bws/defer', [AdminOnboardingController::class, 'deferBwsRuntimeReader'])
-                ->middleware(['can:users.manage', 'throttle:5,1'])
+                ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.bws.defer');
             Route::post('/admin/onboarding/bws/resume', [AdminOnboardingController::class, 'resumeBwsRuntimeReader'])
-                ->middleware(['can:users.manage', 'throttle:5,1'])
+                ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.bws.resume');
             Route::post('/admin/onboarding/initial-import/customer-sites/preview', [AdminOnboardingController::class, 'previewCustomerSiteImport'])
                 ->middleware(['can:integrations.manage', 'throttle:5,1'])
@@ -227,12 +239,21 @@ Route::middleware(['auth', 'verified', RequireConfirmedTwoFactor::class, 'can:wo
             Route::post('/admin/onboarding/initial-import/customer-sites/resume', [AdminOnboardingController::class, 'resumeCustomerSiteImport'])
                 ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.initial-import.customer-sites.resume');
-            Route::post('/admin/onboarding/initial-import/customer-sites/csv/preview', [AdminOnboardingController::class, 'previewCsvCustomerSiteImport'])
+            Route::post('/admin/onboarding/initial-import/quickbooks-file/preview', [AdminOnboardingController::class, 'previewQuickBooksFileImport'])
                 ->middleware(['can:integrations.manage', 'throttle:5,1'])
-                ->name('admin.onboarding.initial-import.customer-sites.csv.preview');
-            Route::post('/admin/onboarding/initial-import/customer-sites/csv/start', [AdminOnboardingController::class, 'startCsvCustomerSiteImport'])
+                ->name('admin.onboarding.initial-import.quickbooks-file.preview');
+            Route::post('/admin/onboarding/initial-import/quickbooks-file/start', [AdminOnboardingController::class, 'startQuickBooksFileImport'])
                 ->middleware(['can:integrations.manage', 'throttle:5,1'])
-                ->name('admin.onboarding.initial-import.customer-sites.csv.start');
+                ->name('admin.onboarding.initial-import.quickbooks-file.start');
+            Route::post('/admin/onboarding/initial-import/fieldpulse/preview', [AdminFieldPulseImportController::class, 'preview'])
+                ->middleware(['can:integrations.manage', 'throttle:5,1'])
+                ->name('admin.onboarding.initial-import.fieldpulse.preview');
+            Route::post('/admin/onboarding/initial-import/fieldpulse/start', [AdminFieldPulseImportController::class, 'start'])
+                ->middleware(['can:integrations.manage', 'throttle:5,1'])
+                ->name('admin.onboarding.initial-import.fieldpulse.start');
+            Route::post('/admin/onboarding/initial-import/fieldpulse/resume', [AdminFieldPulseImportController::class, 'resume'])
+                ->middleware(['can:integrations.manage', 'throttle:5,1'])
+                ->name('admin.onboarding.initial-import.fieldpulse.resume');
             Route::post('/admin/onboarding/initial-import/items/preview', [AdminOnboardingController::class, 'previewItemCatalogImport'])
                 ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.initial-import.items.preview');
@@ -243,18 +264,20 @@ Route::middleware(['auth', 'verified', RequireConfirmedTwoFactor::class, 'can:wo
                 ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.initial-import.items.resume');
             Route::post('/admin/onboarding/initial-import/resume', [AdminOnboardingController::class, 'resumeInitialImport'])
-                ->middleware(['can:users.manage', 'throttle:5,1'])
+                ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.initial-import.resume');
             Route::post('/admin/onboarding/reconcile', [AdminOnboardingController::class, 'reconcileFailures'])
-                ->middleware(['can:users.manage', 'throttle:5,1'])
+                ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.reconcile');
             Route::post('/admin/onboarding/complete', [AdminOnboardingController::class, 'complete'])
-                ->middleware(['can:users.manage', 'throttle:5,1'])
+                ->middleware(['can:integrations.manage', 'throttle:5,1'])
                 ->name('admin.onboarding.complete');
         });
         Route::get('/admin/customers', [AdminCustomerController::class, 'index'])->name('admin.customers');
         Route::get('/admin/customers/{customer}/workspace', [AdminCustomerWorkspaceController::class, 'show'])
             ->name('admin.customers.workspace.show');
+        Route::post('/admin/customers/{customer}/projects', [AdminCustomerWorkspaceController::class, 'storeProject'])
+            ->name('admin.customers.projects.store');
         Route::put('/admin/customers/{customer}/workspace', [AdminCustomerWorkspaceController::class, 'update'])
             ->name('admin.customers.workspace.update');
         Route::post('/admin/customers/{customer}/quickbooks/resolve', [AdminCustomerWorkspaceController::class, 'resolveQuickBooksConflict'])

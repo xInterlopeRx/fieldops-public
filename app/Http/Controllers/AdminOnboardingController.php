@@ -3,14 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Exceptions\QuickBooksApiException;
-use App\Models\ApplicationSetupState;
-use App\Models\QuickBooksInitialCustomerImport;
 use App\Models\QuickBooksItemCatalogSync;
-use App\Services\CsvCustomerSiteImportService;
+use App\Services\FieldPulse\FieldPulseDocumentImportService;
 use App\Services\OnboardingReadinessService;
+use App\Services\QuickBooks\QuickBooksXlsxCustomerImportService;
 use App\Services\QuickBooksInitialCustomerImportService;
 use App\Services\QuickBooksItemCatalogSyncService;
-use App\Services\SetCustomerImportMode;
 use App\Services\SetQuickBooksSyncOptIn;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\RedirectResponse;
@@ -23,44 +21,21 @@ class AdminOnboardingController extends Controller
 {
     public function show(
         OnboardingReadinessService $onboarding,
-        SetCustomerImportMode $importMode,
         QuickBooksItemCatalogSyncService $itemCatalog,
+        FieldPulseDocumentImportService $fieldPulse,
+        QuickBooksXlsxCustomerImportService $quickBooksFile,
     ): Response {
         return Inertia::render('Admin/Onboarding', [
             'readiness' => $onboarding->snapshot(),
-            'importMode' => $importMode->snapshot(),
             'status' => session('status'),
             'error' => session('error'),
             'qboImportPreview' => session('qboImportPreview'),
             'qboItemImportPreview' => session('qboItemImportPreview'),
-            'csvImportPreview' => session('csvImportPreview'),
+            'fieldpulseImportPreview' => session('fieldpulseImportPreview'),
+            'fieldpulseImport' => $fieldPulse->currentRunSummary(),
+            'quickBooksFilePreview' => session('quickbooksFilePreview'),
+            'quickBooksFileImport' => $quickBooksFile->currentRunSummary(),
         ]);
-    }
-
-    public function setCustomerImportMode(Request $request, SetCustomerImportMode $importMode): RedirectResponse
-    {
-        $request->validate([
-            'import_mode' => ['required', 'in:quickbooks_api,csv_upload'],
-            'password' => ['required', 'current_password'],
-            'confirm_api_transition' => ['sometimes', 'boolean'],
-        ]);
-
-        try {
-            $importMode->change(
-                $request->user(),
-                $request->string('import_mode')->toString(),
-                $request->boolean('confirm_api_transition'),
-            );
-        } catch (ValidationException $exception) {
-            return back()->withErrors($exception->errors());
-        }
-
-        $status = $request->string('import_mode')->toString() === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API
-            && $request->boolean('confirm_api_transition')
-                ? 'QuickBooks API mode is selected. Existing CSV-imported Customers/Sites remain local-only and are not matched by name; the API import creates separate QBO-linked records.'
-                : 'The first-run Customer/Site import source was updated. Existing import and QuickBooks write-back paths remain unchanged for already-imported records.';
-
-        return to_route('admin.onboarding')->with('status', $status);
     }
 
     public function setQuickBooksSyncOptIn(Request $request, SetQuickBooksSyncOptIn $optIn): RedirectResponse
@@ -156,7 +131,6 @@ class AdminOnboardingController extends Controller
     public function resumeCustomerSiteImport(
         Request $request,
         QuickBooksInitialCustomerImportService $apiImport,
-        CsvCustomerSiteImportService $csvImport,
     ): RedirectResponse {
         $request->validate([
             'confirm_import' => ['required', 'accepted'],
@@ -164,20 +138,7 @@ class AdminOnboardingController extends Controller
         ]);
 
         try {
-            $source = ApplicationSetupState::query()->whereKey(1)->value('quickbooks_import_mode')
-                === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV
-                ? QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD
-                : QuickBooksInitialCustomerImport::SOURCE_QUICKBOOKS_API;
-            $run = QuickBooksInitialCustomerImport::query()
-                ->where('environment', app()->environment())
-                ->where('source', $source)
-                ->firstOrFail();
-
-            if ($run->source === QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD) {
-                $csvImport->resume($request->user());
-            } else {
-                $apiImport->resume($request->user());
-            }
+            $apiImport->resume($request->user());
         } catch (QuickBooksApiException $exception) {
             return to_route('admin.onboarding')->with('error', 'QuickBooks Customer/Site import could not resume. Check the company connection and retry ('.$exception->reason.').');
         } catch (ConnectionException) {
@@ -186,12 +147,7 @@ class AdminOnboardingController extends Controller
             return back()->withErrors($exception->errors());
         }
 
-        return to_route('admin.onboarding')->with(
-            'status',
-            $run->source === QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD
-                ? 'The local-only Customer/Site CSV import resumed from its protected source payload.'
-                : 'The Customer/Site import resumed from the saved QuickBooks company snapshot.',
-        );
+        return to_route('admin.onboarding')->with('status', 'The Customer/Site import resumed from the saved QuickBooks company snapshot.');
     }
 
     public function previewItemCatalogImport(Request $request, QuickBooksItemCatalogSyncService $itemCatalog): RedirectResponse
@@ -258,53 +214,39 @@ class AdminOnboardingController extends Controller
         return to_route('admin.onboarding')->with('status', 'QuickBooks Item catalog sync resumed from the saved QuickBooks company snapshot.');
     }
 
-    public function previewCsvCustomerSiteImport(Request $request, CsvCustomerSiteImportService $csvImport): RedirectResponse
+    public function previewQuickBooksFileImport(Request $request, QuickBooksXlsxCustomerImportService $import): RedirectResponse
     {
         $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,txt', 'extensions:csv', 'max:5120'],
+            'quickbooks_file' => ['required', 'file', 'mimes:xlsx', 'extensions:xlsx', 'max:20480'],
             'password' => ['required', 'current_password'],
         ]);
 
         try {
-            $preview = $csvImport->preview($request->user(), $request->file('file'));
+            $preview = $import->preview($request->user(), $request->file('quickbooks_file'));
         } catch (ValidationException $exception) {
             return back()->withErrors($exception->errors());
-        } catch (\RuntimeException $exception) {
-            return to_route('admin.onboarding')->with('error', 'CSV preview could not be completed ('.$exception->getMessage().').');
         }
 
         return to_route('admin.onboarding')
-            ->with('csvImportPreview', $preview)
-            ->with('status', 'CSV preview complete. No file contents or Customer records were stored.');
+            ->with('quickbooksFilePreview', $preview)
+            ->with('status', 'QuickBooks file preview complete. No records were stored.');
     }
 
-    public function startCsvCustomerSiteImport(Request $request, CsvCustomerSiteImportService $csvImport): RedirectResponse
+    public function startQuickBooksFileImport(Request $request, QuickBooksXlsxCustomerImportService $import): RedirectResponse
     {
         $request->validate([
-            'file' => ['required', 'file', 'mimes:csv,txt', 'extensions:csv', 'max:5120'],
-            'preview_sha256' => ['required', 'string', 'size:64', 'regex:/\A[a-f0-9]{64}\z/'],
+            'quickbooks_file' => ['required', 'file', 'mimes:xlsx', 'extensions:xlsx', 'max:20480'],
             'confirm_import' => ['required', 'accepted'],
             'password' => ['required', 'current_password'],
         ]);
 
         try {
-            $run = $csvImport->start(
-                $request->user(),
-                $request->file('file'),
-                $request->string('preview_sha256')->toString(),
-            );
+            $import->start($request->user(), $request->file('quickbooks_file'));
         } catch (ValidationException $exception) {
             return back()->withErrors($exception->errors());
-        } catch (\RuntimeException $exception) {
-            return to_route('admin.onboarding')->with('error', 'CSV import could not start ('.$exception->getMessage().').');
         }
 
-        return to_route('admin.onboarding')->with(
-            'status',
-            $run->status === 'in_progress'
-                ? 'The local-only Customer/Site CSV import has been queued.'
-                : 'The Customer/Site CSV import is already in progress.',
-        );
+        return to_route('admin.onboarding')->with('status', 'The QuickBooks file import has been queued.');
     }
 
     public function reconcileFailures(Request $request, OnboardingReadinessService $onboarding): RedirectResponse

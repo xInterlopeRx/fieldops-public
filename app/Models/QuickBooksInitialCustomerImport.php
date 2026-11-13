@@ -18,6 +18,8 @@ class QuickBooksInitialCustomerImport extends Model
 
     public const SOURCE_QUICKBOOKS_API = 'quickbooks_api';
 
+    public const SOURCE_QUICKBOOKS_XLSX = 'quickbooks_xlsx';
+
     public const SOURCE_CSV_UPLOAD = 'csv_upload';
 
     public const STATUS_FAILED = 'failed';

@@ -66,7 +66,6 @@ class QuickBooksSyncControl
                     ->first();
 
                 if (! $state->quickbooks_sync_opted_in
-                    || $state->quickbooks_import_mode !== ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API
                     || ! ($bwsConnection?->isVerifiedForCurrentEnvironment() ?? false)
                     || ! $quickBooks->isConnectedForCurrentEnvironment()) {
                     throw ValidationException::withMessages([

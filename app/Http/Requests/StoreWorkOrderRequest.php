@@ -2,9 +2,11 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Project;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreWorkOrderRequest extends FormRequest
 {
@@ -86,8 +88,40 @@ class StoreWorkOrderRequest extends FormRequest
             'customer_email' => ['nullable', 'email', 'max:255'],
             'customer_phone' => ['nullable', 'string', 'max:50'],
             'customer_address' => ['nullable', 'string', 'max:1000'],
+            'project_id' => ['nullable', 'integer', 'exists:projects,id'],
             'files' => ['nullable', 'array', 'max:20'],
             'files.*' => ['file', 'max:20480', 'mimes:jpg,jpeg,png,gif,webp,pdf,txt,csv,doc,docx,xls,xlsx,ppt,pptx'],
         ];
+    }
+
+    /** @return array<int, callable(Validator): void> */
+    public function after(): array
+    {
+        return [function (Validator $validator): void {
+            $projectId = $this->input('project_id');
+
+            if ($projectId === null || $validator->errors()->hasAny(['project_id', 'customer_id'])) {
+                return;
+            }
+
+            $customerId = $this->input('customer_id');
+            $project = Project::query()->find($projectId);
+
+            if ($customerId === null || $project === null || (int) $project->customer_id !== (int) $customerId) {
+                $validator->errors()->add('project_id', 'Choose a Project belonging to the selected Client.');
+
+                return;
+            }
+
+            $siteId = $this->input('site_id');
+
+            if (
+                $siteId !== null
+                && $project->sites()->exists()
+                && ! $project->sites()->whereKey($siteId)->exists()
+            ) {
+                $validator->errors()->add('site_id', 'Choose a Site linked to this Project.');
+            }
+        }];
     }
 }

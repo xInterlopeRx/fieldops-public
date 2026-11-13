@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import axios from "axios";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { XMarkIcon } from "@heroicons/vue/24/outline";
+import { ClipboardDocumentListIcon, PlusIcon, XMarkIcon } from "@heroicons/vue/24/outline";
 import { usePage } from "@inertiajs/vue3";
 import AttachmentFileTypeIcon from "@/Components/AttachmentFileTypeIcon.vue";
 import AttachmentOnlineActions from "@/Components/AttachmentOnlineActions.vue";
@@ -53,8 +53,8 @@ interface JobWorkspaceData {
     statusHistory: Array<{ id: number; fromStatus: string | null; toStatus: string; reason: string | null; actor: string; createdAt: string | null }>;
 }
 
-const props = withDefaults(defineProps<{ jobId: number; canArchive: boolean; nested?: boolean; inlineOnDesktop?: boolean; editRequestId?: number }>(), { nested: false, inlineOnDesktop: false, editRequestId: 0 });
-const emit = defineEmits<{ close: []; saved: []; archived: []; "editing-change": [editing: boolean] }>();
+const props = withDefaults(defineProps<{ jobId: number; canArchive: boolean; nested?: boolean; inlineOnDesktop?: boolean; showAddAction?: boolean; editRequestId?: number }>(), { nested: false, inlineOnDesktop: false, showAddAction: false, editRequestId: 0 });
+const emit = defineEmits<{ close: []; saved: []; archived: []; "add-job": [customerId: number | null, siteId: number | null]; "editing-change": [editing: boolean] }>();
 const isDesktopInline = useDesktopInlineWorkspace(props.inlineOnDesktop);
 const page = usePage();
 const {
@@ -70,7 +70,7 @@ const requiresPendingReason = (status: string): boolean =>
     statusDefinition(status)?.pending_reason_required ?? false;
 
 const contactSlots = [
-    { key: "clientContactId", label: "Client contact" },
+    { key: "clientContactId", label: "Customer contact" },
     { key: "technicalContactId", label: "Technical contact" },
     { key: "projectManagerContactId", label: "Project manager" },
     { key: "contractorContactId", label: "Contractor check-in contact" },
@@ -486,31 +486,41 @@ onBeforeUnmount(() => {
         @keydown.esc.stop="requestClose"
     >
         <section ref="panelElement" tabindex="-1" class="fieldops-workspace-panel fieldops-job-workspace" :class="{ 'fieldops-workspace-panel--inline-desktop': isDesktopInline }" :role="isDesktopInline ? 'region' : 'dialog'" :aria-modal="isDesktopInline ? undefined : 'true'" :aria-label="data ? `Job ${data.job.number} details` : 'Job details'" @keydown="handleDialogKeydown">
-            <header class="relative flex shrink-0 items-start justify-between gap-4 border-b border-gray-200 px-4 py-4 sm:px-6">
+            <header class="relative flex shrink-0 flex-col gap-3 border-b border-gray-200 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:px-6">
                 <div class="min-w-0">
                     <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">{{ data?.job.customerName ?? "Job" }}<span v-if="data?.job.projectName"> · {{ data.job.projectName }}</span></p>
                     <h2 class="truncate text-lg font-semibold text-gray-900">{{ data?.job.number }} · {{ data?.job.title ?? "Loading job" }}</h2>
-                    <span v-if="data" class="fieldops-status-badge mt-1" :class="statusBadgeClass(data.job.status)">{{ workOrderStatusLabel(data.job.status) }}</span>
                     <p v-if="data?.job.subtitle" class="truncate text-sm text-gray-600">{{ data.job.subtitle }}</p>
                 </div>
-                <div class="flex shrink-0 items-center gap-2">
+                <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
                     <template v-if="!isEditing">
                         <label class="sr-only" for="job-preview-status">Change Job status</label>
                         <select
                             id="job-preview-status"
                             v-model="previewStatus"
-                            class="fieldops-client-input min-h-10 max-w-36 py-1 text-xs"
+                            class="fieldops-client-input fieldops-job-workspace__header-control fieldops-job-workspace__status-select max-w-36"
                             aria-label="Change Job status"
+                            :class="statusBadgeClass(previewStatus)"
                             :disabled="previewStatusSaving || loading"
                             @change="updatePreviewStatus(previewStatus)"
                         >
                             <option v-for="status in page.props.work_order_statuses" :key="status.value" :value="status.value">{{ status.label }}</option>
                         </select>
                     </template>
-                    <button type="button" class="fieldops-secondary-action min-h-10 px-3" :aria-expanded="activityOpen" aria-label="Show job activity" @click="activityOpen = !activityOpen">
-                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path stroke-linecap="round" d="M12 7v5l3 2"/></svg>
+                    <button
+                        v-if="props.showAddAction && !isEditing"
+                        type="button"
+                        class="fieldops-secondary-action fieldops-add-action fieldops-job-workspace__header-control inline-flex shrink-0 items-center gap-2 px-3 py-1"
+                        :disabled="loading || !data"
+                        @click="emit('add-job', data?.job.customerId ?? null, data?.job.siteId ?? null)"
+                    >
+                        <PlusIcon class="h-4 w-4" aria-hidden="true" />
+                        Add Job
                     </button>
-                    <button v-if="!isEditing" type="button" class="fieldops-secondary-action inline-flex h-10 w-10 items-center justify-center p-0" aria-label="Close job details" title="Close details" @click="requestClose">
+                    <button type="button" class="fieldops-secondary-action fieldops-job-workspace__header-action inline-flex h-11 w-11 items-center justify-center p-0" :aria-expanded="activityOpen" aria-label="Show job activity log" title="Job activity log" @click="activityOpen = !activityOpen">
+                        <ClipboardDocumentListIcon class="h-5 w-5" aria-hidden="true" />
+                    </button>
+                    <button v-if="!isEditing" type="button" class="fieldops-secondary-action fieldops-job-workspace__header-action inline-flex h-11 w-11 items-center justify-center p-0" aria-label="Close job details" title="Close details" @click="requestClose">
                         <XMarkIcon class="h-5 w-5" aria-hidden="true" />
                     </button>
                 </div>
@@ -646,7 +656,7 @@ onBeforeUnmount(() => {
                         <label class="fieldops-workspace-field">Required job scope<textarea v-model="draft.scope" rows="5" required maxlength="20000" :readonly="!isEditing" /></label>
                         <label class="fieldops-workspace-field">Internal notes<textarea v-model="draft.jobNotes" rows="4" maxlength="20000" :readonly="!isEditing" /></label>
                         <label class="fieldops-workspace-field">Field notes (included in client updates and reports)<textarea v-model="draft.fieldNotes" rows="4" maxlength="20000" :readonly="!isEditing" /></label>
-                        <label v-if="requiresClientSummary(draft.status)" class="fieldops-workspace-field">Client completion summary<textarea v-model="draft.clientCompletionSummary" rows="3" maxlength="5000" required :readonly="!isEditing" /></label>
+                        <label v-if="requiresClientSummary(draft.status)" class="fieldops-workspace-field">Customer completion summary<textarea v-model="draft.clientCompletionSummary" rows="3" maxlength="5000" required :readonly="!isEditing" /></label>
                         <section class="space-y-2">
                             <h3 class="text-sm font-semibold text-gray-900">Assigned staff</h3>
                             <StaffAssignmentDropdown v-model="draft.assignedUserIds" :staff="data.staff" :disabled="!isEditing" />

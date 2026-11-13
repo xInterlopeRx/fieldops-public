@@ -188,7 +188,7 @@ class ValidateMicrosoftGraphPermissionBoundary
                 $this->audit(
                     $actor,
                     $currentTarget,
-                    'microsoft_graph_onboarding_non_target_denial_stale_result_discarded',
+                    'microsoft_graph_stale_non_target_denial_discarded',
                     $statuses,
                     'graph_onboarding_targets_changed_during_check',
                 );

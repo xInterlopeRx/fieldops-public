@@ -94,7 +94,7 @@ class OnboardingReadinessTest extends TestCase
         $this->assertSame(ApplicationSetupStep::STATUS_PENDING, $step->status);
         $snapshot = app(OnboardingReadinessService::class)->snapshot();
         $this->assertFalse($snapshot['ready']);
-        $this->assertContains('Initial QuickBooks Customer/Site/Item import', $snapshot['blockers']);
+        $this->assertContains('Initial Customer/Site import', $snapshot['blockers']);
     }
 
     public function test_admin_can_defer_and_resume_bws_setup_without_unlocking_invitations(): void
@@ -135,6 +135,7 @@ class OnboardingReadinessTest extends TestCase
         $this->connectBwsReader(BitwardenSecretManagerConnection::PROFILE_GRAPH_ONLY);
         app(ApplicationSetupStepService::class)->markFirstAdminReadyIfEligible($admin);
         app(ApplicationSetupStepService::class)->pass(ApplicationSetupStep::BWS_RUNTIME_READER, $admin);
+        app(ApplicationSetupStepService::class)->pass(ApplicationSetupStep::INITIAL_QBO_IMPORT, $admin);
         ApplicationSetupState::query()->whereKey(1)->update([
             'readiness_completed_at' => now(),
             'readiness_completed_by_user_id' => $admin->getKey(),
@@ -146,9 +147,9 @@ class OnboardingReadinessTest extends TestCase
 
         $this->assertFalse($snapshot['quickBooksOptedIn']);
         $this->assertSame(ApplicationSetupStep::STATUS_NOT_REQUIRED, $steps[ApplicationSetupStep::QUICKBOOKS_OAUTH]['status']);
-        $this->assertSame(ApplicationSetupStep::STATUS_NOT_REQUIRED, $steps[ApplicationSetupStep::INITIAL_QBO_IMPORT]['status']);
+        $this->assertSame(ApplicationSetupStep::STATUS_PASSED, $steps[ApplicationSetupStep::INITIAL_QBO_IMPORT]['status']);
         $this->assertNotContains('Connect the QuickBooks company', $snapshot['blockers']);
-        $this->assertNotContains('Initial QuickBooks Customer/Site/Item import', $snapshot['blockers']);
+        $this->assertNotContains('Initial Customer/Site import', $snapshot['blockers']);
         $this->assertTrue($snapshot['invitationsUnlocked']);
         $this->assertTrue(app(OnboardingReadinessService::class)->invitationsUnlocked());
     }
@@ -233,23 +234,6 @@ class OnboardingReadinessTest extends TestCase
         $this->assertTrue(app(OnboardingReadinessService::class)->invitationsUnlocked());
     }
 
-    public function test_quickbooks_opt_in_is_rejected_for_csv_only_source_mode(): void
-    {
-        $admin = $this->verifiedBootstrapAdmin();
-        ApplicationSetupState::query()->whereKey(1)->update([
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV,
-        ]);
-        $this->loginWithTotp($admin);
-
-        $this->put(route('admin.onboarding.quickbooks-opt-in.update'), [
-            'opted_in' => true,
-            'confirm_change' => true,
-            'password' => 'password',
-        ])->assertSessionHasErrors('quickbooks_opt_in');
-
-        $this->assertFalse((bool) ApplicationSetupState::query()->whereKey(1)->value('quickbooks_sync_opted_in'));
-    }
-
     public function test_admin_cannot_complete_readiness_while_graph_validation_is_pending(): void
     {
         $admin = $this->verifiedBootstrapAdmin();
@@ -310,11 +294,11 @@ class OnboardingReadinessTest extends TestCase
         $this->assertFalse(app(OnboardingReadinessService::class)->invitationsUnlocked());
         $this->assertSame('customer_site_complete', $snapshot['customerSiteImport']['status']);
         $this->assertSame(ApplicationSetupStep::STATUS_IN_PROGRESS, collect($snapshot['steps'])->firstWhere('key', ApplicationSetupStep::INITIAL_QBO_IMPORT)['status']);
-        $this->assertContains('Initial QuickBooks Customer/Site/Item import', $snapshot['blockers']);
+        $this->assertContains('Initial Customer/Site import', $snapshot['blockers']);
         $this->assertStringContainsString('Preview and confirm the read-only QuickBooks Item catalog sync', collect($snapshot['steps'])->firstWhere('key', ApplicationSetupStep::INITIAL_QBO_IMPORT)['message']);
     }
 
-    public function test_completed_csv_import_allows_invitations_with_quickbooks_sync_off_and_no_item_catalog(): void
+    public function test_completed_local_import_allows_invitations_with_quickbooks_sync_off_and_no_item_catalog(): void
     {
         $admin = $this->verifiedBootstrapAdmin();
         $this->connectBwsReader(BitwardenSecretManagerConnection::PROFILE_GRAPH_ONLY);
@@ -339,7 +323,6 @@ class OnboardingReadinessTest extends TestCase
             'customer_sites_completed_at' => now(),
         ]);
         ApplicationSetupState::query()->whereKey(1)->update([
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV,
             'quickbooks_sync_opted_in' => false,
             'quickbooks_sync_opted_in_at' => null,
             'quickbooks_sync_enabled' => false,

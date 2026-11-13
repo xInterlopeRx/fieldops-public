@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\ProjectStatus;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -26,7 +27,7 @@ class UpdateAdminProjectWorkspaceRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'notes' => ['nullable', 'string', 'max:20000'],
-            'status' => ['required', Rule::in(['created', 'scheduled', 'planning', 'active', 'on_hold', 'completed', 'cancelled'])],
+            'status' => ['required', Rule::enum(ProjectStatus::class)],
             'site_ids' => ['present', 'array', 'max:100'],
             'site_ids.*' => ['required', 'integer', 'distinct', 'exists:sites,id'],
             'assigned_user_ids' => ['present', 'array', 'max:100'],

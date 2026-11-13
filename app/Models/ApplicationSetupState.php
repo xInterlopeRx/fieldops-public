@@ -7,15 +7,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ApplicationSetupState extends Model
 {
-    public const QUICKBOOKS_IMPORT_MODE_API = 'quickbooks_api';
-
-    public const QUICKBOOKS_IMPORT_MODE_CSV = 'csv_upload';
-
     public $incrementing = false;
 
     protected $fillable = [
         'onboarding_required',
-        'quickbooks_import_mode',
         'quickbooks_sync_opted_in',
         'quickbooks_sync_opted_in_at',
         'quickbooks_sync_verification_required',
@@ -26,7 +21,6 @@ class ApplicationSetupState extends Model
     ];
 
     protected $attributes = [
-        'quickbooks_import_mode' => self::QUICKBOOKS_IMPORT_MODE_API,
         'quickbooks_sync_opted_in' => false,
         'quickbooks_sync_verification_required' => false,
         'quickbooks_sync_enabled' => false,

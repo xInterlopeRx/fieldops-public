@@ -302,6 +302,27 @@ class QuickBooksCustomerSyncService
             'quickbooks_created_at' => $this->parseTimestamp(Arr::get($payload, 'MetaData.CreateTime')),
             'quickbooks_updated_at' => $this->parseTimestamp(Arr::get($payload, 'MetaData.LastUpdatedTime')),
         ])->save();
+
+        $customerPrimaryContact = $customer->contacts()
+            ->whereNull('site_id')
+            ->where('contact_type', 'primary')
+            ->first();
+
+        if ($customerPrimaryContact !== null) {
+            $customerPrimaryContact->fill([
+                'first_name' => $payload['GivenName'] ?? null,
+                'middle_name' => $payload['MiddleName'] ?? null,
+                'last_name' => $payload['FamilyName'] ?? null,
+                'title' => $payload['Title'] ?? null,
+                'suffix' => $payload['Suffix'] ?? null,
+                'email' => Arr::get($payload, 'PrimaryEmailAddr.Address'),
+                'phone' => Arr::get($payload, 'PrimaryPhone.FreeFormNumber'),
+                'alternate_phone' => Arr::get($payload, 'AlternatePhone.FreeFormNumber'),
+                'mobile_phone' => Arr::get($payload, 'Mobile.FreeFormNumber'),
+                'fax' => Arr::get($payload, 'Fax.FreeFormNumber'),
+                'website' => Arr::get($payload, 'WebAddr.URI'),
+            ])->save();
+        }
     }
 
     private function syncAddress(Customer $customer, string $addressType, mixed $address, bool $authoritative = false): void
@@ -485,11 +506,14 @@ class QuickBooksCustomerSyncService
         $hasContactDetails = collect($contactAttributes)
             ->except('source')
             ->contains(fn (mixed $value): bool => is_string($value) && trim($value) !== '');
-        $contact = Contact::query()->where([
+        $contact = $site->primaryContact;
+        $siteScopedPrimaryContact = Contact::query()->where([
             'customer_id' => $customer->getKey(),
             'site_id' => $site->getKey(),
             'contact_type' => 'primary',
         ])->first();
+
+        $contact ??= $siteScopedPrimaryContact;
 
         if ($contact === null && Contact::withArchived()->where([
             'customer_id' => $customer->getKey(),
@@ -504,12 +528,26 @@ class QuickBooksCustomerSyncService
             return;
         }
 
-        $contact ??= new Contact([
-            'customer_id' => $customer->getKey(),
-            'site_id' => $site->getKey(),
-            'contact_type' => 'primary',
-        ]);
-        $contact->fill($contactAttributes)->save();
+        if ($contact === null) {
+            $contact = new Contact([
+                'customer_id' => $customer->getKey(),
+                'site_id' => $site->getKey(),
+                'contact_type' => 'primary',
+                'source' => 'quickbooks',
+            ]);
+        }
+
+        if ($contact->source === 'quickbooks') {
+            $contact->fill($contactAttributes);
+        } else {
+            $contact->fill(Arr::except($contactAttributes, ['source']));
+        }
+
+        $contact->save();
+
+        if ($site->primary_contact_id !== $contact->getKey()) {
+            $site->forceFill(['primary_contact_id' => $contact->getKey()])->save();
+        }
     }
 
     private function syncSiteAddress(Customer $customer, Site $site, string $addressType, mixed $address): void
@@ -518,6 +556,48 @@ class QuickBooksCustomerSyncService
         $hasAddress = collect($address)
             ->except(['Id', 'Lat', 'Long'])
             ->contains(fn (mixed $value): bool => is_string($value) && trim($value) !== '');
+        $incomingAddress = [
+            'line1' => $address['Line1'] ?? null,
+            'line2' => $address['Line2'] ?? null,
+            'line3' => $address['Line3'] ?? null,
+            'line4' => $address['Line4'] ?? null,
+            'line5' => $address['Line5'] ?? null,
+            'city' => $address['City'] ?? null,
+            'country_subdivision_code' => $address['CountrySubDivisionCode'] ?? null,
+            'postal_code' => $address['PostalCode'] ?? null,
+            'country' => $address['Country'] ?? null,
+        ];
+        $quickBooksAddressId = $address['Id'] ?? null;
+
+        if (is_string($quickBooksAddressId) && $quickBooksAddressId !== '') {
+            $existingAddressByProviderId = CustomerAddress::query()
+                ->where('customer_id', $customer->getKey())
+                ->where('source_site_id', $site->getKey())
+                ->where('address_type', $addressType)
+                ->where('quickbooks_address_id', $quickBooksAddressId)
+                ->first();
+
+            if ($existingAddressByProviderId !== null) {
+                $existingAddressByProviderId->fill($incomingAddress)->save();
+
+                return;
+            }
+        }
+
+        $matchingLocalAddress = CustomerAddress::query()
+            ->where('customer_id', $customer->getKey())
+            ->where('source_site_id', $site->getKey())
+            ->where('address_type', $addressType)
+            ->whereIn('source', [CustomerAddress::SOURCE_MANUAL, CustomerAddress::SOURCE_SITE])
+            ->get()
+            ->first(fn (CustomerAddress $candidate): bool => $this->addressFields($candidate) === $incomingAddress);
+
+        if ($matchingLocalAddress !== null) {
+            $matchingLocalAddress->forceFill(['quickbooks_address_id' => $address['Id'] ?? null])->save();
+
+            return;
+        }
+
         $customerAddress = CustomerAddress::query()
             ->where('customer_id', $customer->getKey())
             ->where('source_site_id', $site->getKey())
@@ -546,15 +626,7 @@ class QuickBooksCustomerSyncService
             'address_type' => $addressType,
             'source' => CustomerAddress::SOURCE_QUICKBOOKS,
             'quickbooks_address_id' => $address['Id'] ?? null,
-            'line1' => $address['Line1'] ?? null,
-            'line2' => $address['Line2'] ?? null,
-            'line3' => $address['Line3'] ?? null,
-            'line4' => $address['Line4'] ?? null,
-            'line5' => $address['Line5'] ?? null,
-            'city' => $address['City'] ?? null,
-            'country_subdivision_code' => $address['CountrySubDivisionCode'] ?? null,
-            'postal_code' => $address['PostalCode'] ?? null,
-            'country' => $address['Country'] ?? null,
+            ...$incomingAddress,
             'latitude' => $address['Lat'] ?? null,
             'longitude' => $address['Long'] ?? null,
             'is_default' => false,

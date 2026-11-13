@@ -24,6 +24,11 @@ class UserFactory extends Factory
 
     public function admin(): static
     {
+        return $this->afterCreating(fn (User $user) => $user->syncRoles(['admin', 'finance', 'hr']));
+    }
+
+    public function adminWithoutSecurityGroups(): static
+    {
         return $this->afterCreating(fn (User $user) => $user->syncRoles(['admin']));
     }
 

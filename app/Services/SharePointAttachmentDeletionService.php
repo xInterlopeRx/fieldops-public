@@ -18,16 +18,22 @@ class SharePointAttachmentDeletionService
     public function __construct(
         private readonly MicrosoftGraphSharePointStorageService $storage,
         private readonly AttachmentLifecycleService $lifecycle,
+        private readonly SharePointAttachmentTargetResolver $targets,
     ) {}
 
     public function delete(SharePointAttachment $attachment, User $actor): void
     {
         abort_unless($actor->status === 'active', 403);
         Gate::forUser($actor)->authorize('admin.access');
+        $this->targets->assertAttachmentWriteEnabled($attachment);
         $owner = $this->owner($attachment);
 
         try {
-            $this->storage->delete($attachment->sharepoint_item_id);
+            $this->storage->delete(
+                $attachment->sharepoint_item_id,
+                $attachment->sharepoint_drive_id,
+                $attachment->sharepoint_site_id,
+            );
         } catch (Throwable $exception) {
             if ($owner !== null) {
                 $this->lifecycle->failed($owner, $actor, 'storage_unavailable', 'delete');

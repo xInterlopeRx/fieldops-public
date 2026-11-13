@@ -32,6 +32,16 @@ class BitwardenSecretManagerConnection extends Model
         'MICROSOFT_GRAPH_CLIENT_SECRET',
     ];
 
+    /**
+     * Read-only legacy-migration credential. Not part of the onboarding verify
+     * profiles: a connection only needs to be verified for its environment.
+     *
+     * @var list<string>
+     */
+    public const FIELDPULSE_SECRET_NAMES = [
+        'FIELDPULSE_API_KEY',
+    ];
+
     protected $fillable = [
         'environment',
         'organization_id',
@@ -82,15 +92,6 @@ class BitwardenSecretManagerConnection extends Model
     public function isVerifiedForGraph(): bool
     {
         return $this->isVerifiedForQuickBooksOptIn(false);
-    }
-
-    public function isVerifiedForImportMode(string $mode): bool
-    {
-        return match ($mode) {
-            ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API => $this->isVerifiedForQuickBooksOptIn(true),
-            ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV => $this->isVerifiedForQuickBooksOptIn(false),
-            default => false,
-        };
     }
 
     /** @param list<string> $secretNames */

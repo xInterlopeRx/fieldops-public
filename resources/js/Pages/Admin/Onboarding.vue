@@ -32,13 +32,10 @@ const props = defineProps<{
         canDeferBwsRuntimeReader: boolean;
         canResumeBwsRuntimeReader: boolean;
         canResumeInitialImport: boolean;
-        customerImportMode: 'quickbooks_api' | 'csv_upload';
-        canSelectCustomerImportMode: boolean;
         canStartCustomerSiteImport: boolean;
         canPreviewItemCatalogImport: boolean;
         canStartItemCatalogImport: boolean;
         canResumeItemCatalogImport: boolean;
-        canStartCsvCustomerSiteImport: boolean;
         canResumeCustomerSiteImport: boolean;
         customerSiteImport: {
             status: string;
@@ -74,29 +71,60 @@ const props = defineProps<{
     error?: string | null;
     qboImportPreview?: { customers: number; qboRecords: number; potentialSites: number } | null;
     qboItemImportPreview?: { items: number } | null;
-    importMode: {
-        mode: 'quickbooks_api' | 'csv_upload';
-        hasCustomers: boolean;
-        canChange: boolean;
-        requiresApiTransitionConfirmation: boolean;
-    };
-    csvImportPreview?: {
+    fieldpulseImportPreview?: {
+        source: string;
+        customers: number;
+        locations: number;
+        projects: number;
+        jobs: number;
+        jobs_with_project_reference: number;
+        jobs_with_unmatched_project_reference: number;
+        jobs_with_project_customer_mismatch: number;
+        notes: number;
+        contacts: number;
+        existingRun: FieldPulseRunSummary | null;
+        conflictingSource: boolean;
+    } | null;
+    fieldpulseImport?: FieldPulseRunSummary | null;
+    quickBooksFilePreview?: {
         rows: number;
         customers: number;
-        sites: number;
-        contacts: number;
-        invalidRowCount: number;
-        errors: { row: number; code: string }[];
-        assignedToUnmappedRows: number;
-        financialColumnsIgnored: boolean;
-        unmappedSourceFieldsIgnored: string[];
-        sha256: string;
+        billingAddresses: number;
+        shippingAddresses: number;
+        duplicateRows: number;
+        source: string;
         conflictCount: number;
+        existingRun: { status: string } | null;
+        conflictingSource: boolean;
         canStart: boolean;
+    } | null;
+    quickBooksFileImport?: {
+        status: string;
+        customers_imported: number;
+        customers_total: number;
+        failure_count: number;
+        failure_code: string | null;
     } | null;
 }>();
 
-const importModeForm = useForm({ import_mode: props.readiness.customerImportMode, password: '', confirm_api_transition: false });
+type FieldPulseRunSummary = {
+    status: string;
+    stage: string;
+    customers_imported: number;
+    customers_total: number;
+    sites_imported: number;
+    projects_imported: number;
+    contacts_imported: number;
+    jobs_imported: number;
+    notes_imported: number;
+    comments_imported: number;
+    failure_count: number;
+    failure_code: string | null;
+    document_sha256?: string | null;
+    document_retained_at?: string | null;
+    failures?: Array<{ resource_type: string; source_record_id: string; failure_code: string }>;
+};
+
 const quickBooksOptInForm = useForm({ opted_in: true, confirm_change: false, password: '' });
 const importPreviewForm = useForm({ password: '', quickbooks_import: '' });
 const importStartForm = useForm({ confirm_import: false, password: '', quickbooks_import: '' });
@@ -104,31 +132,114 @@ const importResumeForm = useForm({ confirm_import: false, password: '', quickboo
 const itemPreviewForm = useForm({ password: '', item_import: '' });
 const itemStartForm = useForm({ confirm_import: false, password: '', item_import: '' });
 const itemResumeForm = useForm({ confirm_import: false, password: '', item_import: '' });
-const csvPreviewForm = useForm({ file: null as File | null, password: '', csv_import: '' });
-const csvStartForm = useForm({ file: null as File | null, confirm_import: false, preview_sha256: '', password: '', csv_import: '' });
+const fieldpulsePreviewForm = useForm({ document: null as File | null, password: '', fieldpulse: '' });
+const fieldpulseStartForm = useForm({ document: null as File | null, confirm_import: false, password: '', fieldpulse: '' });
+const fieldpulseResumeForm = useForm({ password: '', fieldpulse: '' });
+
+const fieldpulseRefreshing = ref(false);
+let fieldpulsePollTimer: number | undefined;
+
+const fieldpulseStatusView = computed(() => {
+    const summary = props.fieldpulseImport;
+    if (! summary) {
+        return null;
+    }
+    if (summary.status === 'in_progress') {
+        return { label: 'Import running', tone: 'blue', detail: `Stage: ${summary.stage}` };
+    }
+    if (summary.status === 'customer_site_complete' && summary.failure_count === 0) {
+        return { label: 'Import complete', tone: 'green', detail: 'All FieldPulse records imported without failures.' };
+    }
+    if (summary.status === 'customer_site_complete') {
+        return { label: 'Completed with records needing attention', tone: 'amber', detail: `${summary.failure_count} record(s) recorded as failures.` };
+    }
+    if (summary.status === 'failed') {
+        return { label: 'Import failed', tone: 'red', detail: summary.failure_code ?? '' };
+    }
+
+    return { label: summary.status, tone: 'slate', detail: `Stage: ${summary.stage}` };
+});
+
+const fieldpulsePillClass = computed(() => {
+    const tones: Record<string, string> = {
+        blue: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+        green: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+        amber: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
+        red: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+        slate: 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-200',
+    };
+
+    return tones[fieldpulseStatusView.value?.tone ?? 'slate'] ?? tones.slate;
+});
+
+const fieldpulseStatBlocks = computed(() => {
+    const summary = props.fieldpulseImport;
+    if (! summary) {
+        return [];
+    }
+
+    return [
+        { label: 'Customers', value: summary.customers_total > 0 ? `${summary.customers_imported} / ${summary.customers_total}` : String(summary.customers_imported) },
+        { label: 'Contacts', value: String(summary.contacts_imported) },
+        { label: 'Sites', value: String(summary.sites_imported) },
+        { label: 'Projects', value: String(summary.projects_imported) },
+        { label: 'Jobs', value: String(summary.jobs_imported) },
+        { label: 'Notes', value: String(summary.notes_imported) },
+    ];
+});
+
+const fieldpulseStageProgress = computed(() => {
+    const summary = props.fieldpulseImport;
+    if (! summary || summary.status !== 'in_progress') {
+        return null;
+    }
+
+    const stages = ['customers', 'locations', 'jobs', 'notes'];
+    const labels = ['Customers', 'Locations', 'Jobs', 'Notes'];
+    const stageIndex = stages.indexOf(summary.stage);
+    const done = summary.stage === 'complete' ? stages.length : Math.max(0, stageIndex);
+
+    return {
+        percent: Math.round((done / stages.length) * 100),
+        stages: labels.map((label, i) => ({ label, done: i < done })),
+    };
+});
+
+function refreshFieldPulseImport(): void {
+    if (fieldpulseRefreshing.value) {
+        return;
+    }
+
+    fieldpulseRefreshing.value = true;
+    router.reload({
+        only: ['fieldpulseImport'],
+        onFinish: () => {
+            fieldpulseRefreshing.value = false;
+        },
+    });
+}
+
+onMounted(() => {
+    fieldpulsePollTimer = window.setInterval(() => {
+        if (props.fieldpulseImport?.status === 'in_progress') {
+            refreshFieldPulseImport();
+        }
+    }, 4000);
+});
+
+onUnmounted(() => {
+    if (fieldpulsePollTimer !== undefined) {
+        window.clearInterval(fieldpulsePollTimer);
+    }
+});
+const qbFilePreviewForm = useForm({ quickbooks_file: null as File | null, password: '', quickbooks_file_field: '' });
+const qbFileStartForm = useForm({ quickbooks_file: null as File | null, confirm_import: false, password: '', quickbooks_file_field: '' });
 const legacyResumeForm = useForm({ password: '', onboarding: '' });
 const deferBwsForm = useForm({ confirm_defer: false, password: '', onboarding: '' });
 const resumeBwsForm = useForm({ password: '', onboarding: '' });
 const completeForm = useForm({ confirm_complete: false, password: '', readiness: '' });
 const reconcilingFailures = ref(false);
 const blockedSteps = computed(() => props.readiness.steps.filter((step) => props.readiness.blockers.includes(step.label)));
-
-function selectCsvPreviewFile(event: Event) {
-    const input = event.target as HTMLInputElement;
-    csvPreviewForm.file = input.files?.[0] ?? null;
-}
-
-function selectCsvStartFile(event: Event) {
-    const input = event.target as HTMLInputElement;
-    csvStartForm.file = input.files?.[0] ?? null;
-}
-
-function updateCustomerImportMode() {
-    importModeForm.put(route('admin.onboarding.customer-import-mode.update'), {
-        preserveScroll: true,
-        onFinish: () => importModeForm.reset('password', 'confirm_api_transition'),
-    });
-}
 
 function updateQuickBooksOptIn() {
     quickBooksOptInForm.put(route('admin.onboarding.quickbooks-opt-in.update'), {
@@ -196,22 +307,66 @@ function resumeItemCatalogImport() {
     });
 }
 
-function previewCsvCustomerSiteImport() {
-    csvPreviewForm.transform((data) => ({ file: data.file, password: data.password })).post(route('admin.onboarding.initial-import.customer-sites.csv.preview'), {
+function selectQuickBooksFile(event: Event) {
+    const input = event.target as HTMLInputElement;
+    qbFilePreviewForm.quickbooks_file = input.files?.[0] ?? null;
+}
+
+function selectQuickBooksStartFile(event: Event) {
+    const input = event.target as HTMLInputElement;
+    qbFileStartForm.quickbooks_file = input.files?.[0] ?? null;
+}
+
+function previewQuickBooksFileImport() {
+    qbFilePreviewForm.transform((data) => ({ quickbooks_file: data.quickbooks_file, password: data.password })).post(route('admin.onboarding.initial-import.quickbooks-file.preview'), {
         preserveScroll: true,
-        onFinish: () => { csvPreviewForm.password = ''; },
+        onFinish: () => { qbFilePreviewForm.reset('password'); },
     });
 }
 
-function startCsvCustomerSiteImport() {
-    csvStartForm.transform((data) => ({
-        file: data.file,
-        preview_sha256: props.csvImportPreview?.sha256,
+function startQuickBooksFileImport() {
+    qbFileStartForm.transform((data) => ({
+        quickbooks_file: data.quickbooks_file,
         confirm_import: data.confirm_import,
         password: data.password,
-    })).post(route('admin.onboarding.initial-import.customer-sites.csv.start'), {
+    })).post(route('admin.onboarding.initial-import.quickbooks-file.start'), {
         preserveScroll: true,
-        onFinish: () => { csvStartForm.password = ''; },
+        onFinish: () => { qbFileStartForm.reset('password'); },
+    });
+}
+
+function selectFieldPulseDocument(event: Event) {
+    const input = event.target as HTMLInputElement;
+    fieldpulsePreviewForm.document = input.files?.[0] ?? null;
+}
+
+function selectFieldPulseStartDocument(event: Event) {
+    const input = event.target as HTMLInputElement;
+    fieldpulseStartForm.document = input.files?.[0] ?? null;
+}
+
+function previewFieldPulseImport() {
+    fieldpulsePreviewForm.transform((data) => ({ document: data.document, password: data.password })).post(route('admin.onboarding.initial-import.fieldpulse.preview'), {
+        preserveScroll: true,
+        onFinish: () => { fieldpulsePreviewForm.reset('password'); },
+    });
+}
+
+function startFieldPulseImport() {
+    fieldpulseStartForm.transform((data) => ({
+        document: data.document,
+        confirm_import: data.confirm_import,
+        password: data.password,
+    })).post(route('admin.onboarding.initial-import.fieldpulse.start'), {
+        preserveScroll: true,
+        onFinish: () => { fieldpulseStartForm.reset('password'); },
+    });
+}
+
+function resumeFieldPulseImport() {
+    fieldpulseResumeForm.transform((data) => ({ password: data.password })).post(route('admin.onboarding.initial-import.fieldpulse.resume'), {
+        preserveScroll: true,
+        onFinish: () => { fieldpulseResumeForm.reset('password'); },
     });
 }
 
@@ -304,9 +459,15 @@ function setupStepHref(step: SetupStep): string | null {
 function setupStepSectionId(step: SetupStep): string | null {
     switch (step.key) {
         case 'initial_qbo_import':
-            return props.readiness.customerImportMode === 'csv_upload' || props.readiness.quickBooksOptedIn
-                ? 'initial-import'
-                : 'quickbooks-onboarding';
+            if (!props.readiness.required) {
+                return null;
+            }
+
+            // Without a QuickBooks opt-in the Initial Customer/Site import is
+            // driven by the FieldPulse document upload panel, which is the
+            // first supported source offered on the page. Never send the admin
+            // to the QuickBooks opt-in block or the top of the page.
+            return props.readiness.quickBooksOptedIn ? 'initial-import' : 'fieldpulse-upload';
         case 'failure_reconciliation':
             return 'readiness-receipt';
         default:
@@ -372,7 +533,7 @@ onUnmounted(() => {
             </section>
 
             <section v-else class="grid gap-3 rounded-md border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-900">
-                <section id="quickbooks-onboarding" tabindex="-1" v-if="!readiness.quickBooksOptedIn && readiness.customerImportMode === 'quickbooks_api'" class="grid scroll-mt-6 gap-3 rounded-md border border-gray-200 bg-gray-50 p-4 focus:outline-none focus:ring-2 focus:ring-blue-700 dark:border-gray-700 dark:bg-gray-950">
+                <section id="quickbooks-onboarding" tabindex="-1" v-if="!readiness.quickBooksOptedIn" class="grid scroll-mt-6 gap-3 rounded-md border border-gray-200 bg-gray-50 p-4 focus:outline-none focus:ring-2 focus:ring-blue-700 dark:border-gray-700 dark:bg-gray-950">
                     <div class="grid gap-1">
                         <h2 class="font-semibold text-gray-900 dark:text-gray-100">QuickBooks synchronization is optional</h2>
                         <p class="text-sm text-gray-700 dark:text-gray-300">QuickBooks details and sync controls are on the QuickBooks integration page. Microsoft Graph readiness remains required.</p>
@@ -395,7 +556,7 @@ onUnmounted(() => {
                         </PrimaryButton>
                     </form>
                 </section>
-                <section v-else-if="readiness.quickBooksOptedIn && readiness.customerImportMode === 'quickbooks_api'" id="quickbooks-onboarding" tabindex="-1" class="grid scroll-mt-6 gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 focus:outline-none focus:ring-2 focus:ring-blue-700 dark:border-blue-900 dark:bg-blue-950">
+                <section v-else-if="readiness.quickBooksOptedIn" id="quickbooks-onboarding" tabindex="-1" class="grid scroll-mt-6 gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 focus:outline-none focus:ring-2 focus:ring-blue-700 dark:border-blue-900 dark:bg-blue-950">
                     <div class="grid gap-1 text-sm text-blue-950 dark:text-blue-100">
                         <h2 class="font-semibold">QuickBooks is included in onboarding</h2>
                         <p>Manage the QuickBooks connection, synchronization, and Item catalog from the QuickBooks integration page.</p>
@@ -418,40 +579,6 @@ onUnmounted(() => {
                         </PrimaryButton>
                     </form>
                     <p v-else class="text-sm text-blue-900 dark:text-blue-200">QuickBooks setup has started and cannot be deferred. You can pause synchronization without discarding its connection or setup progress.</p>
-                </section>
-
-                <section v-if="importMode.canChange && readiness.canSelectCustomerImportMode" class="grid gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950">
-                    <div class="grid gap-1">
-                        <h2 class="font-semibold text-blue-950 dark:text-blue-100">Choose the initial Customer/Site source</h2>
-                        <p class="text-sm text-blue-900 dark:text-blue-200">
-                            CSV mode imports local-only records without QuickBooks IDs. After a completed CSV import you can switch to API mode, but CSV records remain local and are never matched by name or merged with QBO records.
-                        </p>
-                    </div>
-                    <form class="grid gap-3 sm:max-w-xl" @submit.prevent="updateCustomerImportMode">
-                        <label class="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
-                            <input v-model="importModeForm.import_mode" type="radio" value="quickbooks_api" class="mt-1 border-gray-300 text-blue-700 focus:ring-blue-700" />
-                            <span><span class="font-semibold">QuickBooks API</span> — requires the verified Intuit app credentials and company OAuth connection.</span>
-                        </label>
-                        <label class="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
-                            <input v-model="importModeForm.import_mode" type="radio" value="csv_upload" class="mt-1 border-gray-300 text-blue-700 focus:ring-blue-700" />
-                            <span><span class="font-semibold">CSV export</span> — imports Customers/Sites locally without Intuit credentials; Graph secrets and readiness checks remain separate.</span>
-                        </label>
-                        <div v-if="importModeForm.import_mode === 'quickbooks_api' && importMode.mode === 'csv_upload' && importMode.requiresApiTransitionConfirmation" class="grid gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-                            <p>CSV records will stay local-only. The later QBO import creates separate records by QuickBooks IDs and will not match names; possible duplicate Customers/Sites must be reviewed manually.</p>
-                            <label class="flex items-start gap-2">
-                                <input v-model="importModeForm.confirm_api_transition" type="checkbox" required class="mt-1 rounded border-amber-400 text-blue-700 focus:ring-blue-700" />
-                                <span>I understand and want to add QuickBooks API records separately from the existing CSV data.</span>
-                            </label>
-                        </div>
-                        <div v-if="importModeForm.import_mode !== readiness.customerImportMode">
-                            <InputLabel for="customer-import-mode-password" value="Current password" />
-                            <TextInput id="customer-import-mode-password" v-model="importModeForm.password" type="password" autocomplete="current-password" required class="mt-1 block w-full" />
-                        </div>
-                        <InputError :message="importModeForm.errors.import_mode || importModeForm.errors.password || importModeForm.errors.confirm_api_transition" />
-                        <PrimaryButton class="w-fit" :disabled="importModeForm.processing || importModeForm.import_mode === readiness.customerImportMode || (importModeForm.import_mode === 'quickbooks_api' && importMode.mode === 'csv_upload' && importMode.requiresApiTransitionConfirmation && !importModeForm.confirm_api_transition)">
-                            {{ importModeForm.processing ? 'Saving…' : 'Save import source' }}
-                        </PrimaryButton>
-                    </form>
                 </section>
 
                 <div class="flex flex-wrap items-start justify-between gap-3">
@@ -551,18 +678,11 @@ onUnmounted(() => {
                     </form>
                 </section>
 
-                <section v-if="readiness.required && (readiness.quickBooksOptedIn || readiness.customerImportMode === 'csv_upload')" id="initial-import" tabindex="-1" class="grid scroll-mt-6 gap-3 rounded-md border border-gray-200 p-4 focus:outline-none focus:ring-2 focus:ring-blue-700 dark:border-gray-700">
+                <section v-if="readiness.required && readiness.quickBooksOptedIn" id="initial-import" tabindex="-1" class="grid scroll-mt-6 gap-3 rounded-md border border-gray-200 p-4 focus:outline-none focus:ring-2 focus:ring-blue-700 dark:border-gray-700">
                     <div class="grid gap-1">
-                        <h3 class="font-semibold text-gray-900 dark:text-gray-100">
-                            {{ readiness.customerImportMode === 'csv_upload' ? 'Customer/Site CSV import' : 'QuickBooks Customer/Site import' }}
-                        </h3>
+                        <h3 class="font-semibold text-gray-900 dark:text-gray-100">QuickBooks Customer/Site import</h3>
                         <p class="text-sm text-gray-600 dark:text-gray-400">
-                            <template v-if="readiness.customerImportMode === 'csv_upload'">
-                                CSV records import locally and remain unlinked from QuickBooks. Paid/unpaid totals are ignored; assignee names are not matched to staff. The encrypted source is removed after a successful import.
-                            </template>
-                            <template v-else>
-                                This importer is additive and resumable: it upserts by QuickBooks IDs and does not clear FieldOps records. Keep the QBO Customer/Site list stable until it finishes; a changed Customer count pauses the run. The read-only Item catalog sync follows this phase.
-                            </template>
+                            This importer is additive and resumable: it upserts by QuickBooks IDs and does not clear FieldOps records. Keep the QBO Customer/Site list stable until it finishes; a changed Customer count pauses the run. The read-only Item catalog sync follows this phase.
                         </p>
                     </div>
                     <div v-if="readiness.customerSiteImport.status !== 'pending'" class="grid gap-1 text-sm text-gray-700 dark:text-gray-300" role="status">
@@ -573,83 +693,130 @@ onUnmounted(() => {
                             <span v-if="readiness.customerSiteImport.failureCode" class="font-mono">{{ readiness.customerSiteImport.failureCode }}</span>
                         </p>
                         <ul v-if="readiness.customerSiteImport.failures.length" class="grid gap-1 rounded bg-red-50 p-2 text-xs text-red-800 dark:bg-red-950 dark:text-red-200" aria-label="Customer import failures">
-                            <li v-for="failure in readiness.customerSiteImport.failures" :key="`${failure.row ?? 'qbo'}-${failure.recordId}`" class="font-mono">
-                                {{ readiness.customerSiteImport.source === 'csv_upload' ? `CSV row ${failure.row ?? 'unknown'} · source ID ${failure.recordId}` : `QuickBooks Customer ${failure.recordId}` }} · {{ failure.code }}
+                            <li v-for="failure in readiness.customerSiteImport.failures" :key="`qbo-${failure.recordId}`" class="font-mono">
+                                QuickBooks Customer {{ failure.recordId }} · {{ failure.code }}
                             </li>
                             <li v-if="readiness.customerSiteImport.failureCount > readiness.customerSiteImport.failures.length" class="font-sans">
                                 Showing the first {{ readiness.customerSiteImport.failures.length }} of {{ readiness.customerSiteImport.failureCount }} unresolved records.
                             </li>
                         </ul>
-                        <p v-if="readiness.customerSiteImport.status === 'customer_site_complete' && readiness.customerImportMode === 'csv_upload'" class="font-semibold text-green-800 dark:text-green-300" role="status">
-                            CSV Customer/Site phase complete. QuickBooks Items are not required while QuickBooks sync is off. Invitations still require the remaining Graph and setup readiness checks and a readiness receipt.
-                        </p>
-                        <p v-else-if="readiness.customerSiteImport.status === 'customer_site_complete'" class="font-semibold text-amber-800 dark:text-amber-200">
+                        <p v-if="readiness.customerSiteImport.status === 'customer_site_complete'" class="font-semibold text-amber-800 dark:text-amber-200">
                             Customer/Site phase complete. The QuickBooks Item catalog must sync before invitation readiness.
                         </p>
                         <p v-else-if="readiness.customerSiteImport.status === 'in_progress'" class="text-blue-800 dark:text-blue-200">
                             Import is processing in the background. This page refreshes progress automatically.
                         </p>
                     </div>
+                </section>
 
-                    <div v-if="readiness.canStartCsvCustomerSiteImport" class="grid gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950">
+                    <div v-if="readiness.required" id="fieldpulse-upload" tabindex="-1" class="grid scroll-mt-6 gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 focus:outline-none focus:ring-2 focus:ring-blue-700 dark:border-slate-700 dark:bg-slate-900">
                         <div class="grid gap-1">
-                            <h4 class="font-semibold text-blue-950 dark:text-blue-100">Preview a Customer export CSV</h4>
-                            <p class="text-sm text-blue-900 dark:text-blue-200">
-                                This path needs no Intuit credentials or QuickBooks OAuth. CSV Customer IDs remain source IDs, imported records stay local-only, and API writes are disabled. The parser ignores financial totals and never matches staff by name.
+                            <h4 class="font-semibold text-slate-900 dark:text-slate-100">FieldPulse upload</h4>
+                            <p class="text-sm text-slate-600 dark:text-slate-300">
+                                Upload our FieldPulse document (an .xlsx workbook with Customers, Locations, Jobs, and Notes sheets). It imports every Location as a Site, plus Contacts, Jobs, and the historical customer/job notes as a timeline. Records are matched only by their FieldPulse IDs. FieldOps retains the uploaded workbook, and this is the migration's source of record — keep your own copy as well.
                             </p>
                         </div>
-                        <form v-if="!csvImportPreview" class="grid gap-3 sm:max-w-xl" enctype="multipart/form-data" @submit.prevent="previewCsvCustomerSiteImport">
+
+                        <div v-if="fieldpulseImport" class="grid gap-3 text-sm text-gray-700 dark:text-gray-300" role="status">
+                            <div v-if="fieldpulseStatusView" class="flex flex-wrap items-center gap-2">
+                                <span :class="fieldpulsePillClass" class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold">
+                                    <svg v-if="fieldpulseImport.status === 'in_progress'" class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                                    </svg>
+                                    {{ fieldpulseStatusView.label }}
+                                </span>
+                                <span v-if="fieldpulseStatusView.detail" class="text-xs text-slate-600 dark:text-slate-400">{{ fieldpulseStatusView.detail }}</span>
+                                <button type="button" class="ml-auto text-xs font-semibold text-blue-700 underline hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-100" @click="refreshFieldPulseImport">
+                                    {{ fieldpulseRefreshing ? 'Refreshing…' : 'Refresh' }}
+                                </button>
+                            </div>
+                            <div v-if="fieldpulseStageProgress" class="grid gap-1">
+                                <div class="h-2.5 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" :aria-valuenow="fieldpulseStageProgress.percent" aria-valuemin="0" aria-valuemax="100">
+                                    <div class="h-full rounded-full bg-blue-600 transition-all duration-700 ease-out" :style="{ width: fieldpulseStageProgress.percent + '%' }"></div>
+                                </div>
+                                <div class="flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400">
+                                    <span v-for="(stage, i) in fieldpulseStageProgress.stages" :key="stage.label" :class="stage.done ? 'font-semibold text-blue-700 dark:text-blue-300' : ''">
+                                        {{ stage.done ? '✓ ' : '' }}{{ stage.label }}
+                                    </span>
+                                    <span class="font-semibold text-slate-700 dark:text-slate-300">{{ fieldpulseStageProgress.percent }}%</span>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                                <div v-for="stat in fieldpulseStatBlocks" :key="stat.label" class="rounded border border-slate-200 bg-white p-2 text-center dark:border-slate-700 dark:bg-slate-800">
+                                    <div class="text-lg font-semibold text-slate-900 dark:text-slate-100">{{ stat.value }}</div>
+                                    <div class="text-xs text-slate-500 dark:text-slate-400">{{ stat.label }}</div>
+                                </div>
+                            </div>
+                            <p class="text-xs text-slate-500 dark:text-slate-400">
+                                Stage: {{ fieldpulseImport.stage }} · The uploaded workbook is retained as the migration's source of record.<span v-if="fieldpulseImport.document_sha256"> SHA-256 {{ fieldpulseImport.document_sha256.slice(0, 12) }}…</span>
+                            </p>
+                            <div v-if="fieldpulseImport.failure_count > 0" class="grid gap-1 rounded border border-amber-300 bg-amber-50 p-2 dark:border-amber-700 dark:bg-amber-950/40">
+                                <p class="font-semibold text-amber-800 dark:text-amber-200">
+                                    {{ fieldpulseImport.failure_count }} record(s) need attention<span v-if="fieldpulseImport.failure_code"> — <span class="font-mono">{{ fieldpulseImport.failure_code }}</span></span>
+                                </p>
+                                <ul class="list-inside list-disc font-mono text-xs text-amber-800 dark:text-amber-200">
+                                    <li v-for="failure in fieldpulseImport.failures ?? []" :key="`${failure.resource_type}-${failure.source_record_id}`">
+                                        {{ failure.resource_type }}: {{ failure.source_record_id }} — {{ failure.failure_code }}
+                                    </li>
+                                </ul>
+                                <p v-if="fieldpulseImport.failure_count > (fieldpulseImport.failures?.length ?? 0)" class="text-xs text-amber-700 dark:text-amber-300">
+                                    Showing the first {{ fieldpulseImport.failures?.length ?? 0 }} of {{ fieldpulseImport.failure_count }}.
+                                </p>
+                            </div>
+                        </div>
+
+                        <form v-if="!fieldpulseImportPreview" class="grid gap-3 sm:max-w-xl" enctype="multipart/form-data" @submit.prevent="previewFieldPulseImport">
                             <label class="grid gap-1 text-sm text-gray-800 dark:text-gray-200">
-                                <span>Customer export CSV (maximum 5 MB)</span>
-                                <input type="file" accept=".csv,text/csv" required class="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-white file:px-3 file:py-2 file:font-semibold file:text-blue-800" @change="selectCsvPreviewFile" />
+                                <span>FieldPulse document (.xlsx, maximum 20 MB)</span>
+                                <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required class="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-white file:px-3 file:py-2 file:font-semibold file:text-blue-800" @change="selectFieldPulseDocument" />
                             </label>
                             <div>
-                                <InputLabel for="csv-preview-password" value="Current password" />
-                                <TextInput id="csv-preview-password" v-model="csvPreviewForm.password" type="password" autocomplete="current-password" required class="mt-1 block w-full" />
-                                <InputError class="mt-2" :message="csvPreviewForm.errors.file || csvPreviewForm.errors.password || csvPreviewForm.errors.csv_import" />
+                                <InputLabel for="fieldpulse-preview-password" value="Current password" />
+                                <TextInput id="fieldpulse-preview-password" v-model="fieldpulsePreviewForm.password" type="password" autocomplete="current-password" required class="mt-1 block w-full" />
+                                <InputError class="mt-2" :message="fieldpulsePreviewForm.errors.document || fieldpulsePreviewForm.errors.password || fieldpulsePreviewForm.errors.fieldpulse" />
                             </div>
-                            <PrimaryButton class="w-fit" :disabled="csvPreviewForm.processing || !csvPreviewForm.file">
-                                {{ csvPreviewForm.processing ? 'Checking CSV…' : 'Preview CSV mapping' }}
+                            <PrimaryButton class="w-fit" :disabled="fieldpulsePreviewForm.processing || !fieldpulsePreviewForm.document">
+                                {{ fieldpulsePreviewForm.processing ? 'Checking document…' : 'Preview document' }}
                             </PrimaryButton>
                         </form>
 
-                        <div v-if="csvImportPreview" class="grid gap-3">
-                            <div class="grid gap-1 text-sm text-blue-950 dark:text-blue-100" role="status">
-                                <p>Rows: {{ csvImportPreview.rows }} · Customers: {{ csvImportPreview.customers }} · Sites: {{ csvImportPreview.sites }} · Contacts: {{ csvImportPreview.contacts }}</p>
-                                <p v-if="csvImportPreview.invalidRowCount > 0" class="font-semibold text-red-700 dark:text-red-300">
-                                    {{ csvImportPreview.invalidRowCount }} row(s) need correction. No records have been imported.
-                                </p>
-                                <p v-if="csvImportPreview.conflictCount > 0" class="font-semibold text-red-700 dark:text-red-300">
-                                    {{ csvImportPreview.conflictCount }} source ID conflict(s) exist. No name-based merge will be attempted.
-                                </p>
-                                <ul v-if="csvImportPreview.errors.length" class="grid gap-1 text-xs text-red-700 dark:text-red-300" aria-label="CSV validation errors">
-                                    <li v-for="item in csvImportPreview.errors" :key="`${item.row}-${item.code}`" class="font-mono">Row {{ item.row }} · {{ item.code }}</li>
-                                </ul>
-                                <p v-if="csvImportPreview.assignedToUnmappedRows > 0">Assignee values on {{ csvImportPreview.assignedToUnmappedRows }} row(s) will not be matched to staff.</p>
-                                <p v-if="csvImportPreview.financialColumnsIgnored">Financial columns are ignored and not imported.</p>
-                                <p v-if="csvImportPreview.unmappedSourceFieldsIgnored.length > 0">
-                                    Not mapped: {{ csvImportPreview.unmappedSourceFieldsIgnored.join(', ') }}. Account type/status, tags, lead source, and creation date need a separate approved mapping.
-                                </p>
+                        <div v-if="fieldpulseImportPreview" class="grid gap-3">
+                            <div class="grid gap-1 text-sm text-slate-700 dark:text-slate-200" role="status">
+                                <p>Document contains {{ fieldpulseImportPreview.customers }} Customer(s), {{ fieldpulseImportPreview.locations }} Location(s), {{ fieldpulseImportPreview.projects }} Project(s), {{ fieldpulseImportPreview.jobs }} Job(s), {{ fieldpulseImportPreview.notes }} note(s), and {{ fieldpulseImportPreview.contacts }} Contact(s). Preview made no local changes.</p>
+                                <p>{{ fieldpulseImportPreview.jobs_with_project_reference }} Job(s) reference a Project; {{ fieldpulseImportPreview.jobs_with_unmatched_project_reference }} reference a Project missing from this document; {{ fieldpulseImportPreview.jobs_with_project_customer_mismatch }} have a Project/Customer mismatch.</p>
+                                <p v-if="fieldpulseImportPreview.conflictingSource" class="font-semibold text-red-700 dark:text-red-300">A first-run Customer/Site import already exists from another source. Reset it before uploading.</p>
                             </div>
-                            <form v-if="csvImportPreview.canStart" class="grid gap-3 sm:max-w-xl" enctype="multipart/form-data" @submit.prevent="startCsvCustomerSiteImport">
+                            <form class="grid gap-3 sm:max-w-xl" enctype="multipart/form-data" @submit.prevent="startFieldPulseImport">
                                 <label class="grid gap-1 text-sm text-gray-800 dark:text-gray-200">
-                                    <span>Select the same CSV again to confirm the previewed file</span>
-                                    <input type="file" accept=".csv,text/csv" required class="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-white file:px-3 file:py-2 file:font-semibold file:text-blue-800" @change="selectCsvStartFile" />
+                                    <span>Select the same document again to confirm it</span>
+                                    <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required class="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-white file:px-3 file:py-2 file:font-semibold file:text-blue-800" @change="selectFieldPulseStartDocument" />
                                 </label>
                                 <label class="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
-                                    <input v-model="csvStartForm.confirm_import" type="checkbox" required class="mt-1 rounded border-gray-300 text-blue-700 focus:ring-blue-700" />
-                                    <span>I authorize importing these Customers, Contacts, billing addresses, and a Primary Site where a service address exists. No QuickBooks IDs, payment totals, or QBO write-back will be created.</span>
+                                    <input v-model="fieldpulseStartForm.confirm_import" type="checkbox" required class="mt-1 rounded border-gray-300 text-blue-700 focus:ring-blue-700" />
+                                    <span>I authorize importing this document: Customers, Locations (as Sites), Contacts, Jobs, and historical notes.</span>
                                 </label>
                                 <div>
-                                    <InputLabel for="csv-start-password" value="Current password" />
-                                    <TextInput id="csv-start-password" v-model="csvStartForm.password" type="password" autocomplete="current-password" required class="mt-1 block w-full" />
-                                    <InputError class="mt-2" :message="csvStartForm.errors.file || csvStartForm.errors.password || csvStartForm.errors.confirm_import || csvStartForm.errors.csv_import" />
+                                    <InputLabel for="fieldpulse-start-password" value="Current password" />
+                                    <TextInput id="fieldpulse-start-password" v-model="fieldpulseStartForm.password" type="password" autocomplete="current-password" required class="mt-1 block w-full" />
+                                    <InputError class="mt-2" :message="fieldpulseStartForm.errors.document || fieldpulseStartForm.errors.password || fieldpulseStartForm.errors.confirm_import || fieldpulseStartForm.errors.fieldpulse" />
                                 </div>
-                                <PrimaryButton class="w-fit" :disabled="csvStartForm.processing || !csvStartForm.file || !csvStartForm.confirm_import">
-                                    {{ csvStartForm.processing ? 'Starting…' : 'Start local-only CSV import' }}
+                                <PrimaryButton class="w-fit" :disabled="fieldpulseStartForm.processing || !fieldpulseStartForm.document || !fieldpulseStartForm.confirm_import">
+                                    {{ fieldpulseStartForm.processing ? 'Starting…' : 'Start FieldPulse upload' }}
                                 </PrimaryButton>
                             </form>
                         </div>
+
+                        <form v-if="fieldpulseImport && fieldpulseImport.status === 'in_progress'" class="grid gap-3 sm:max-w-xl" @submit.prevent="resumeFieldPulseImport">
+                            <div>
+                                <InputLabel for="fieldpulse-resume-password" value="Current password" />
+                                <TextInput id="fieldpulse-resume-password" v-model="fieldpulseResumeForm.password" type="password" autocomplete="current-password" required class="mt-1 block w-full" />
+                                <InputError class="mt-2" :message="fieldpulseResumeForm.errors.password || fieldpulseResumeForm.errors.fieldpulse" />
+                            </div>
+                            <PrimaryButton class="w-fit" :disabled="fieldpulseResumeForm.processing">
+                                {{ fieldpulseResumeForm.processing ? 'Resuming…' : 'Resume FieldPulse upload' }}
+                            </PrimaryButton>
+                        </form>
                     </div>
 
                     <div v-if="readiness.canStartCustomerSiteImport" class="grid gap-3">
@@ -700,7 +867,7 @@ onUnmounted(() => {
                         </PrimaryButton>
                     </form>
 
-                    <section v-if="readiness.customerImportMode === 'quickbooks_api' && (readiness.itemCatalog.status !== 'pending' || readiness.canPreviewItemCatalogImport || readiness.canStartItemCatalogImport || readiness.canResumeItemCatalogImport)" class="grid gap-3 rounded-lg border border-gray-200 p-4 dark:border-gray-700" aria-labelledby="qbo-items-title">
+                    <section v-if="readiness.itemCatalog.status !== 'pending' || readiness.canPreviewItemCatalogImport || readiness.canStartItemCatalogImport || readiness.canResumeItemCatalogImport" class="grid gap-3 rounded-lg border border-gray-200 p-4 dark:border-gray-700" aria-labelledby="qbo-items-title">
                         <div class="grid gap-1">
                             <h4 id="qbo-items-title" class="font-semibold text-gray-900 dark:text-gray-100">QuickBooks Item catalog</h4>
                             <p class="text-sm text-gray-600 dark:text-gray-400">
@@ -760,7 +927,6 @@ onUnmounted(() => {
                             </PrimaryButton>
                         </form>
                     </section>
-                </section>
 
                 <section v-if="readiness.canResumeInitialImport" class="grid gap-3 rounded-md border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950">
                     <div class="grid gap-1">
@@ -777,6 +943,61 @@ onUnmounted(() => {
                             {{ legacyResumeForm.processing ? 'Saving…' : 'Clear deferral' }}
                         </PrimaryButton>
                     </form>
+                </section>
+
+                <section v-if="readiness.required" class="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
+                    <div class="grid gap-1">
+                        <h4 class="font-semibold text-slate-900 dark:text-slate-100">QuickBooks Customer Contact List upload</h4>
+                        <p class="text-sm text-slate-600 dark:text-slate-300">
+                            Upload the QuickBooks "Customer Contact List" .xlsx export. Customers are matched by a synthetic source key (the report has no QuickBooks ID) and their billing/shipping addresses are imported. No QuickBooks API call or link is created. FieldOps retains the uploaded report.
+                        </p>
+                    </div>
+
+                    <div v-if="quickBooksFileImport" class="grid gap-1 text-sm text-gray-700 dark:text-gray-300" role="status">
+                        <p>Status: {{ quickBooksFileImport.status }} · Customers {{ quickBooksFileImport.customers_imported }} / {{ quickBooksFileImport.customers_total }}</p>
+                        <p v-if="quickBooksFileImport.failure_count > 0" class="text-red-700 dark:text-red-300">{{ quickBooksFileImport.failure_count }} record(s) need attention. <span v-if="quickBooksFileImport.failure_code" class="font-mono">{{ quickBooksFileImport.failure_code }}</span></p>
+                    </div>
+
+                    <form v-if="!quickBooksFilePreview" class="grid gap-3 sm:max-w-xl" enctype="multipart/form-data" @submit.prevent="previewQuickBooksFileImport">
+                        <label class="grid gap-1 text-sm text-gray-800 dark:text-gray-200">
+                            <span>Customer Contact List (.xlsx, maximum 20 MB)</span>
+                            <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required class="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-white file:px-3 file:py-2 file:font-semibold file:text-blue-800" @change="selectQuickBooksFile" />
+                        </label>
+                        <div>
+                            <InputLabel for="qb-file-preview-password" value="Current password" />
+                            <TextInput id="qb-file-preview-password" v-model="qbFilePreviewForm.password" type="password" autocomplete="current-password" required class="mt-1 block w-full" />
+                            <InputError class="mt-2" :message="qbFilePreviewForm.errors.quickbooks_file || qbFilePreviewForm.errors.password" />
+                        </div>
+                        <PrimaryButton class="w-fit" :disabled="qbFilePreviewForm.processing || !qbFilePreviewForm.quickbooks_file">
+                            {{ qbFilePreviewForm.processing ? 'Checking file…' : 'Preview file' }}
+                        </PrimaryButton>
+                    </form>
+
+                    <div v-if="quickBooksFilePreview" class="grid gap-3">
+                        <div class="grid gap-1 text-sm text-slate-700 dark:text-slate-200" role="status">
+                            <p>{{ quickBooksFilePreview.customers }} Customer(s), {{ quickBooksFilePreview.billingAddresses }} billing and {{ quickBooksFilePreview.shippingAddresses }} shipping address(es) detected. Preview made no local changes.</p>
+                            <p v-if="quickBooksFilePreview.conflictCount > 0" class="font-semibold text-red-700 dark:text-red-300">{{ quickBooksFilePreview.conflictCount }} source key conflict(s) exist. No name-based merge will be attempted.</p>
+                            <p v-if="quickBooksFilePreview.conflictingSource" class="font-semibold text-red-700 dark:text-red-300">A first-run Customer/Site import already exists from another source. Reset it first.</p>
+                        </div>
+                        <form v-if="quickBooksFilePreview.canStart" class="grid gap-3 sm:max-w-xl" enctype="multipart/form-data" @submit.prevent="startQuickBooksFileImport">
+                            <label class="grid gap-1 text-sm text-gray-800 dark:text-gray-200">
+                                <span>Select the same file again to confirm it</span>
+                                <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required class="block w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-white file:px-3 file:py-2 file:font-semibold file:text-blue-800" @change="selectQuickBooksStartFile" />
+                            </label>
+                            <label class="flex items-start gap-2 text-sm text-gray-800 dark:text-gray-200">
+                                <input v-model="qbFileStartForm.confirm_import" type="checkbox" required class="mt-1 rounded border-gray-300 text-blue-700 focus:ring-blue-700" />
+                                <span>I authorize importing these Customers and their addresses. No QuickBooks IDs or write-back will be created.</span>
+                            </label>
+                            <div>
+                                <InputLabel for="qb-file-start-password" value="Current password" />
+                                <TextInput id="qb-file-start-password" v-model="qbFileStartForm.password" type="password" autocomplete="current-password" required class="mt-1 block w-full" />
+                                <InputError class="mt-2" :message="qbFileStartForm.errors.quickbooks_file || qbFileStartForm.errors.password || qbFileStartForm.errors.confirm_import" />
+                            </div>
+                            <PrimaryButton class="w-fit" :disabled="qbFileStartForm.processing || !qbFileStartForm.quickbooks_file || !qbFileStartForm.confirm_import">
+                                {{ qbFileStartForm.processing ? 'Starting…' : 'Start QuickBooks file import' }}
+                            </PrimaryButton>
+                        </form>
+                    </div>
                 </section>
 
                 <section id="readiness-receipt" class="grid scroll-mt-6 gap-3 rounded-md border border-gray-200 p-4 dark:border-gray-700" tabindex="-1">

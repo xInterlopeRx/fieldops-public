@@ -168,6 +168,7 @@ class QuickBooksCustomerWriteService
         }
 
         $customer = Customer::query()->with('addresses')->findOrFail($customerId);
+        $isCreatingCustomer = $customer->quickbooks_id === null;
 
         if ($customer->import_source === QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD) {
             throw new QuickBooksApiException('csv_import_customer_is_local_only', 403);
@@ -277,7 +278,22 @@ class QuickBooksCustomerWriteService
         if ($nextRequestId !== null) {
             PushQuickBooksCustomer::dispatch($customerId, $nextRequestId)
                 ->onQueue($this->syncControl->queueForDispatch());
+        } elseif ($isCreatingCustomer) {
+            $this->queueClientFormSites($customerId);
         }
+    }
+
+    private function queueClientFormSites(int $customerId): void
+    {
+        Site::query()
+            ->where('customer_id', $customerId)
+            ->where('metadata->created_from', 'client_form')
+            ->whereNull('quickbooks_id')
+            ->whereNull('quickbooks_write_request_id')
+            ->orderBy('id')
+            ->limit(20)
+            ->get()
+            ->each(fn (Site $site) => $this->queueSite($site));
     }
 
     public function pushSite(int $siteId, string $requestId): void
@@ -286,7 +302,7 @@ class QuickBooksCustomerWriteService
             throw new QuickBooksApiException('sandbox_writes_disabled', 403);
         }
 
-        $site = Site::query()->with(['customer', 'contacts'])->findOrFail($siteId);
+        $site = Site::query()->with(['customer', 'primaryContact', 'customerAddresses', 'contacts'])->findOrFail($siteId);
 
         if ($site->import_source === QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD) {
             throw new QuickBooksApiException('csv_import_site_is_local_only', 403);
@@ -321,11 +337,16 @@ class QuickBooksCustomerWriteService
             'BillWithParent' => $site->quickbooks_bill_with_parent ?? false,
         ];
 
-        if (is_string($site->address) && trim($site->address) !== '') {
+        $siteAddress = $site->customerAddresses
+            ->firstWhere('address_type', CustomerAddress::TYPE_SHIPPING);
+
+        if ($siteAddress instanceof CustomerAddress && is_string($siteAddress->line1) && trim($siteAddress->line1) !== '') {
+            $payload['ShipAddr'] = $this->physicalAddress($siteAddress);
+        } elseif (is_string($site->address) && trim($site->address) !== '') {
             $payload['ShipAddr'] = ['Line1' => $site->address];
         }
 
-        $primaryContact = $site->contacts->firstWhere('contact_type', 'primary');
+        $primaryContact = $site->primaryContact ?? $site->contacts->firstWhere('contact_type', 'primary');
 
         if ($primaryContact instanceof Contact) {
             $payload = [...$payload, ...$this->siteContactPayload($primaryContact)];

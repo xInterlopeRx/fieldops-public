@@ -11,6 +11,13 @@ class MicrosoftGraphSharePointStorageService
 
     private const MAX_THUMBNAIL_BYTES = 2 * 1024 * 1024;
 
+    /** @var array<string, true> */
+    private array $verifiedTargets = [];
+
+    private const MAX_OFFICE_PACKAGE_ENTRIES = 2048;
+
+    private const MAX_OFFICE_PACKAGE_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+
     public function __construct(
         private readonly MicrosoftGraphApiClient $graph,
         private readonly MicrosoftGraphSharePointService $sharepoint,
@@ -24,6 +31,37 @@ class MicrosoftGraphSharePointStorageService
      */
     public function upload(string $path, string $contents, string $contentType = 'application/octet-stream'): array
     {
+        $this->pathSegments($path);
+        $this->validateContentType($contentType);
+
+        if (strlen($contents) > self::MAX_FILE_BYTES) {
+            throw new MicrosoftGraphApiException('graph_sharepoint_storage_file_too_large', 422);
+        }
+
+        $target = $this->configuredTarget();
+
+        return $this->uploadToTarget(
+            $target['site_id'],
+            $target['drive_id'],
+            $path,
+            $contents,
+            $contentType,
+        );
+    }
+
+    /**
+     * Store or replace a file in a server-selected, validated Site/Drive target.
+     * The caller must never take these identifiers from a request.
+     *
+     * @return array{id: string, name: string, size: int, mime_type: string|null, e_tag: string|null, c_tag: string|null, last_modified_at: string|null, sharepoint_url: string|null}
+     */
+    public function uploadToTarget(
+        string $siteId,
+        string $driveId,
+        string $path,
+        string $contents,
+        string $contentType = 'application/octet-stream',
+    ): array {
         $segments = $this->pathSegments($path);
         $this->validateContentType($contentType);
         $size = strlen($contents);
@@ -32,7 +70,8 @@ class MicrosoftGraphSharePointStorageService
             throw new MicrosoftGraphApiException('graph_sharepoint_storage_file_too_large', 422);
         }
 
-        ['site_id' => $siteId, 'drive_id' => $driveId] = $this->configuredTarget();
+        ['site_id' => $siteId, 'drive_id' => $driveId] = $this->verifiedTarget($siteId, $driveId);
+
         $this->ensureParentFolders($driveId, $segments);
 
         $destination = implode('/', $segments);
@@ -47,7 +86,7 @@ class MicrosoftGraphSharePointStorageService
             $contents,
             contentType: $contentType,
         );
-        $metadata = $this->normalizeFileMetadata($item, basename($destination), $size, $contentType);
+        $metadata = $this->normalizeFileMetadata($item, basename($destination), $size, $contentType, strictSize: false);
 
         Log::info('SharePoint storage file uploaded', [
             'site_id' => $siteId,
@@ -59,20 +98,25 @@ class MicrosoftGraphSharePointStorageService
         return $metadata;
     }
 
+    public function verifyTarget(string $siteId, string $driveId): void
+    {
+        $this->verifiedTarget($siteId, $driveId);
+    }
+
     /**
      * @return array{id: string, name: string, size: int, mime_type: string|null, e_tag: string|null, c_tag: string|null, last_modified_at: string|null, sharepoint_url: string|null}
      */
-    public function metadata(string $itemId): array
+    public function metadata(string $itemId, ?string $driveId = null): array
     {
         $itemId = $this->validateItemId($itemId);
-        ['drive_id' => $driveId] = $this->configuredTarget();
+        $driveId = $this->driveId($driveId);
 
         return $this->fileMetadataById($driveId, $itemId);
     }
 
-    public function download(string $itemId): string
+    public function download(string $itemId, ?string $driveId = null): string
     {
-        return $this->downloadWithMetadata($itemId)['contents'];
+        return $this->downloadWithMetadata($itemId, $driveId)['contents'];
     }
 
     /**
@@ -83,10 +127,10 @@ class MicrosoftGraphSharePointStorageService
      *     contents: string
      * }
      */
-    public function downloadWithMetadata(string $itemId): array
+    public function downloadWithMetadata(string $itemId, ?string $driveId = null): array
     {
         $itemId = $this->validateItemId($itemId);
-        ['drive_id' => $driveId] = $this->configuredTarget();
+        $driveId = $this->driveId($driveId);
         $metadata = $this->fileMetadataById($driveId, $itemId);
 
         if ($metadata['size'] > self::MAX_FILE_BYTES) {
@@ -95,7 +139,7 @@ class MicrosoftGraphSharePointStorageService
 
         $contents = $this->graph->getContent(
             'drives/'.rawurlencode($driveId).'/items/'.rawurlencode($itemId).'/content',
-            $metadata['size'],
+            self::MAX_FILE_BYTES,
         );
 
         if (strlen($contents) !== $metadata['size']) {
@@ -109,15 +153,44 @@ class MicrosoftGraphSharePointStorageService
     }
 
     /**
+     * Verify the bounded source bytes and MIME type before an audited recorded-size correction.
+     *
+     * @return array{size: int, content_size: int, mime_type: string|null, sha256: string}
+     */
+    public function verifiedSourceForSizeReconciliation(
+        string $itemId,
+        string $driveId,
+        string $expectedMimeType,
+    ): array {
+        $this->validateContentType($expectedMimeType);
+        $source = $this->downloadWithMetadata($itemId, $driveId);
+        $metadata = $source['metadata'];
+
+        if (
+            $metadata['mime_type'] !== null &&
+            strtolower($metadata['mime_type']) !== strtolower($expectedMimeType)
+        ) {
+            throw new MicrosoftGraphApiException('graph_sharepoint_attachment_source_verification_failed', 409);
+        }
+
+        return [
+            'size' => $metadata['size'],
+            'content_size' => strlen($source['contents']),
+            'mime_type' => $metadata['mime_type'],
+            'sha256' => hash('sha256', $source['contents']),
+        ];
+    }
+
+    /**
      * Fetch a Graph-generated medium thumbnail without downloading the original file.
      * The short-lived thumbnail URL is consumed server-side and is never returned or logged.
      *
      * @return array{contents: string, width: int, height: int}
      */
-    public function thumbnail(string $itemId): array
+    public function thumbnail(string $itemId, ?string $driveId = null): array
     {
         $itemId = $this->validateItemId($itemId);
-        ['drive_id' => $driveId] = $this->configuredTarget();
+        $driveId = $this->driveId($driveId);
         $metadata = $this->fileMetadataById($driveId, $itemId);
 
         if (! in_array($metadata['mime_type'], ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) {
@@ -167,10 +240,17 @@ class MicrosoftGraphSharePointStorageService
         ];
     }
 
-    public function delete(string $itemId): void
+    public function delete(string $itemId, ?string $driveId = null, ?string $siteId = null): void
     {
         $itemId = $this->validateItemId($itemId);
-        ['site_id' => $siteId, 'drive_id' => $driveId] = $this->configuredTarget();
+        if ($driveId === null) {
+            $target = $this->configuredTarget();
+            $siteId = $target['site_id'];
+            $driveId = $target['drive_id'];
+        } else {
+            $driveId = $this->validateDriveId($driveId);
+            $siteId = is_string($siteId) && trim($siteId) !== '' ? trim($siteId) : null;
+        }
 
         try {
             $metadata = $this->fileMetadataById($driveId, $itemId);
@@ -215,17 +295,347 @@ class MicrosoftGraphSharePointStorageService
             throw new MicrosoftGraphApiException('graph_sharepoint_storage_configuration_incomplete', 503);
         }
 
-        $siteId = trim($siteId);
-        $driveId = trim($driveId);
-        $drives = $this->sharepoint->discoverDrives($siteId);
+        return $this->verifiedTarget(trim($siteId), trim($driveId));
+    }
 
-        foreach ($drives as $drive) {
-            if ($drive['id'] === $driveId) {
-                return ['site_id' => $siteId, 'drive_id' => $driveId];
+    /** @return array{site_id: string, drive_id: string} */
+    private function verifiedTarget(string $siteId, string $driveId): array
+    {
+        if (! config('services.microsoft_graph.sharepoint_enabled')) {
+            throw new MicrosoftGraphApiException('graph_sharepoint_storage_disabled', 503);
+        }
+
+        if (
+            $siteId === '' || strlen($siteId) > 512 || preg_match('/[\/\\?#\r\n]/', $siteId) === 1 ||
+            $driveId === '' || $driveId !== trim($driveId) || strlen($driveId) > 512 || preg_match('/[\x00-\x20\x7F]/', $driveId) === 1
+        ) {
+            throw new MicrosoftGraphApiException('graph_sharepoint_storage_configuration_incomplete', 503);
+        }
+
+        $cacheKey = hash('sha256', $siteId."\0".$driveId);
+
+        if (! isset($this->verifiedTargets[$cacheKey])) {
+            $drives = $this->sharepoint->discoverDrives($siteId);
+
+            if (! collect($drives)->contains(fn (array $drive): bool => $drive['id'] === $driveId)) {
+                throw new MicrosoftGraphApiException('graph_sharepoint_configured_drive_not_in_site', 422);
+            }
+
+            $this->verifiedTargets[$cacheKey] = true;
+        }
+
+        return ['site_id' => $siteId, 'drive_id' => $driveId];
+    }
+
+    private function driveId(?string $driveId): string
+    {
+        if ($driveId === null) {
+            return $this->configuredTarget()['drive_id'];
+        }
+
+        if ($driveId === '' || $driveId !== trim($driveId) || strlen($driveId) > 512 || preg_match('/[\x00-\x20\x7F]/', $driveId) === 1) {
+            throw new MicrosoftGraphApiException('graph_sharepoint_storage_drive_id_invalid', 422);
+        }
+
+        return $driveId;
+    }
+
+    /** @return array{id: string, name: string, size: int, mime_type: string|null, e_tag: string|null, c_tag: string|null, last_modified_at: string|null, sharepoint_url: string|null}|null */
+    public function metadataByPath(string $driveId, string $path): ?array
+    {
+        $driveId = $this->driveId($driveId);
+        $segments = $this->pathSegments($path);
+        $item = $this->driveItemByPath($driveId, implode('/', $segments));
+
+        if ($item === null) {
+            return null;
+        }
+
+        $itemId = $item['id'] ?? null;
+
+        if (! is_string($itemId) || $itemId === '') {
+            throw new MicrosoftGraphApiException('graph_sharepoint_storage_invalid_file_metadata', 502);
+        }
+
+        return $this->fileMetadataById($driveId, $itemId);
+    }
+
+    /**
+     * Copy one bounded file between configured SharePoint drives without deleting the source.
+     * A deterministic destination path makes retries safe after an interrupted DB update.
+     *
+     * @return array{metadata: array{id: string, name: string, size: int, mime_type: string|null, e_tag: string|null, c_tag: string|null, last_modified_at: string|null, sharepoint_url: string|null}, sha256: string, destination_sha256: string, source_size: int, source_mime_type: string|null, destination_mime_type: string|null, transformed: bool, reused: bool}
+     */
+    public function copyFileToTarget(
+        string $sourceItemId,
+        string $sourceDriveId,
+        string $targetSiteId,
+        string $targetDriveId,
+        string $targetPath,
+        int $expectedSize,
+        string $expectedMimeType,
+        bool $allowOfficeTransformation = false,
+    ): array {
+        $this->verifiedTarget($targetSiteId, $targetDriveId);
+        $source = $this->downloadWithMetadata($sourceItemId, $sourceDriveId);
+        $sourceBytes = $source['contents'];
+        $sourceMetadata = $source['metadata'];
+        $this->validateContentType($expectedMimeType);
+
+        if (
+            strlen($sourceBytes) !== $sourceMetadata['size'] ||
+            (! $allowOfficeTransformation && $sourceMetadata['size'] !== $expectedSize) ||
+            ($sourceMetadata['mime_type'] !== null && strtolower($sourceMetadata['mime_type']) !== strtolower($expectedMimeType))
+        ) {
+            throw new MicrosoftGraphApiException('graph_sharepoint_attachment_source_verification_failed', 409);
+        }
+
+        $sourceHash = hash('sha256', $sourceBytes);
+        $existing = $this->metadataByPath($targetDriveId, $targetPath);
+
+        if ($existing !== null) {
+            if (
+                (! $allowOfficeTransformation && $existing['size'] !== $sourceMetadata['size']) ||
+                ! $this->destinationMimeTypeMatches($existing['mime_type'], $expectedMimeType, $targetPath)
+            ) {
+                throw new MicrosoftGraphApiException('graph_sharepoint_attachment_destination_conflict', 409);
+            }
+
+            $existingFile = $this->downloadWithMetadata($existing['id'], $targetDriveId);
+            $destinationHash = hash('sha256', $existingFile['contents']);
+            $transformed = ! hash_equals($sourceHash, $destinationHash);
+
+            if ($transformed && (
+                ! $allowOfficeTransformation ||
+                ! $this->officeTransformationPreservesContent($sourceBytes, $existingFile['contents'], $expectedMimeType)
+            )) {
+                throw new MicrosoftGraphApiException('graph_sharepoint_attachment_destination_conflict', 409);
+            }
+
+            return [
+                'metadata' => $existingFile['metadata'],
+                'sha256' => $sourceHash,
+                'destination_sha256' => $destinationHash,
+                'source_size' => $sourceMetadata['size'],
+                'source_mime_type' => $sourceMetadata['mime_type'],
+                'destination_mime_type' => $existingFile['metadata']['mime_type'],
+                'transformed' => $transformed,
+                'reused' => true,
+            ];
+        }
+
+        $targetMetadata = $this->uploadToTarget(
+            $targetSiteId,
+            $targetDriveId,
+            $targetPath,
+            $sourceBytes,
+            $expectedMimeType,
+        );
+
+        if (! $allowOfficeTransformation && $targetMetadata['size'] !== $sourceMetadata['size']) {
+            throw new MicrosoftGraphApiException('graph_sharepoint_attachment_destination_size_mismatch', 502);
+        }
+
+        $verifiedTarget = $this->downloadWithMetadata($targetMetadata['id'], $targetDriveId);
+        $destinationHash = hash('sha256', $verifiedTarget['contents']);
+        $transformed = ! hash_equals($sourceHash, $destinationHash);
+
+        if (
+            (! $allowOfficeTransformation && $verifiedTarget['metadata']['size'] !== $sourceMetadata['size']) ||
+            ! $this->destinationMimeTypeMatches($verifiedTarget['metadata']['mime_type'], $expectedMimeType, $targetPath) ||
+            ($transformed && (
+                ! $allowOfficeTransformation ||
+                ! $this->officeTransformationPreservesContent($sourceBytes, $verifiedTarget['contents'], $expectedMimeType)
+            ))
+        ) {
+            throw new MicrosoftGraphApiException('graph_sharepoint_attachment_destination_verification_failed', 502);
+        }
+
+        return [
+            'metadata' => $verifiedTarget['metadata'],
+            'sha256' => $sourceHash,
+            'destination_sha256' => $destinationHash,
+            'source_size' => $sourceMetadata['size'],
+            'source_mime_type' => $sourceMetadata['mime_type'],
+            'destination_mime_type' => $verifiedTarget['metadata']['mime_type'],
+            'transformed' => $transformed,
+            'reused' => false,
+        ];
+    }
+
+    private function destinationMimeTypeMatches(?string $actualMimeType, string $expectedMimeType, string $targetPath): bool
+    {
+        if ($actualMimeType === null || strtolower($actualMimeType) === strtolower($expectedMimeType)) {
+            return true;
+        }
+
+        return strtolower(pathinfo($targetPath, PATHINFO_EXTENSION)) === 'eml'
+            && strtolower($expectedMimeType) === 'text/plain'
+            && strtolower($actualMimeType) === 'message/rfc822';
+    }
+
+    private function officeTransformationPreservesContent(
+        string $source,
+        string $destination,
+        string $mimeType,
+    ): bool {
+        $requiredPart = match (strtolower($mimeType)) {
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'word/document.xml',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xl/workbook.xml',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation' => 'ppt/presentation.xml',
+            default => null,
+        };
+
+        if ($requiredPart === null) {
+            return false;
+        }
+
+        $sourceParts = $this->officePackagePartHashes($source);
+        $destinationParts = $this->officePackagePartHashes($destination);
+
+        if (
+            $sourceParts === null ||
+            $destinationParts === null ||
+            ! isset($sourceParts['[Content_Types].xml'], $sourceParts[$requiredPart]) ||
+            array_keys($sourceParts) !== array_keys($destinationParts)
+        ) {
+            return false;
+        }
+
+        foreach ($sourceParts as $name => $hash) {
+            if (hash_equals($hash, $destinationParts[$name])) {
+                continue;
+            }
+
+            // SharePoint may normalize package metadata while preserving the
+            // workbook/document/presentation parts. Those package metadata
+            // changes are allowed only after the operator accepts the Office
+            // transformation; all other parts must remain byte-identical.
+            if (! str_starts_with($name, 'docProps/') && ! str_starts_with($name, 'customXml/')) {
+                return false;
             }
         }
 
-        throw new MicrosoftGraphApiException('graph_sharepoint_configured_drive_not_in_site', 422);
+        return true;
+    }
+
+    /** @return array<string, string>|null */
+    private function officePackagePartHashes(string $contents): ?array
+    {
+        if (! class_exists(\ZipArchive::class)) {
+            return null;
+        }
+
+        $temporaryPath = tempnam(sys_get_temp_dir(), 'fieldops-office-package-');
+
+        if (! is_string($temporaryPath)) {
+            return null;
+        }
+
+        try {
+            if (file_put_contents($temporaryPath, $contents) !== strlen($contents)) {
+                return null;
+            }
+
+            $archive = new \ZipArchive;
+            $opened = $archive->open($temporaryPath, \ZipArchive::RDONLY);
+
+            if ($opened !== true || $archive->numFiles > self::MAX_OFFICE_PACKAGE_ENTRIES) {
+                if ($opened === true) {
+                    $archive->close();
+                }
+
+                return null;
+            }
+
+            $parts = [];
+            $totalUncompressedBytes = 0;
+
+            for ($index = 0; $index < $archive->numFiles; $index++) {
+                $name = $archive->getNameIndex($index);
+                $stat = $archive->statIndex($index);
+
+                if (
+                    ! is_string($name) || isset($parts[$name]) || ! is_array($stat) ||
+                    ! is_int($stat['size'] ?? null) || $stat['size'] < 0
+                ) {
+                    $archive->close();
+
+                    return null;
+                }
+
+                $totalUncompressedBytes += $stat['size'];
+
+                if ($totalUncompressedBytes > self::MAX_OFFICE_PACKAGE_UNCOMPRESSED_BYTES) {
+                    $archive->close();
+
+                    return null;
+                }
+
+                if (str_ends_with($name, '/') && $stat['size'] === 0) {
+                    $parts[$name] = hash('sha256', '');
+
+                    continue;
+                }
+
+                $stream = $archive->getStream($name);
+
+                if (! is_resource($stream)) {
+                    $archive->close();
+
+                    return null;
+                }
+
+                $hash = hash_init('sha256');
+                $readBytes = 0;
+
+                while (! feof($stream)) {
+                    $chunk = fread($stream, 64 * 1024);
+
+                    if (! is_string($chunk)) {
+                        fclose($stream);
+                        $archive->close();
+
+                        return null;
+                    }
+
+                    if ($chunk === '' && ! feof($stream)) {
+                        fclose($stream);
+                        $archive->close();
+
+                        return null;
+                    }
+
+                    $readBytes += strlen($chunk);
+
+                    if ($readBytes > $stat['size']) {
+                        fclose($stream);
+                        $archive->close();
+
+                        return null;
+                    }
+
+                    hash_update($hash, $chunk);
+                }
+
+                fclose($stream);
+
+                if ($readBytes !== $stat['size']) {
+                    $archive->close();
+
+                    return null;
+                }
+
+                $parts[$name] = hash_final($hash);
+            }
+
+            $archive->close();
+            ksort($parts);
+
+            return $parts;
+        } finally {
+            @unlink($temporaryPath);
+        }
     }
 
     /** @param list<string> $segments */
@@ -321,6 +731,7 @@ class MicrosoftGraphSharePointStorageService
         ?int $expectedSize = null,
         ?string $fallbackMimeType = null,
         ?string $expectedId = null,
+        bool $strictSize = true,
     ): array {
         $id = $item['id'] ?? null;
         $name = $item['name'] ?? null;
@@ -333,7 +744,7 @@ class MicrosoftGraphSharePointStorageService
             ! is_string($name) || $name === '' ||
             ($expectedName !== null && $name !== $expectedName) ||
             ! is_int($size) || $size < 0 ||
-            ($expectedSize !== null && $size !== $expectedSize) ||
+            ($strictSize && $expectedSize !== null && $size !== $expectedSize) ||
             ! is_array($file) ||
             is_array($item['folder'] ?? null)
         ) {

@@ -50,22 +50,10 @@ const adminTabs = [
         icon: WrenchScrewdriverIcon,
     },
     {
-        key: "time-tracking",
-        label: "Time Tracking",
-        route: "admin.time-tracking.dashboard",
-        icon: ClockIcon,
-    },
-    {
         key: "profile",
         label: "MyProfile",
         route: "profile.edit",
         icon: UserCircleIcon,
-    },
-    {
-        key: "archive",
-        label: "Archive",
-        route: "admin.archive",
-        icon: ArchiveBoxIcon,
     },
     {
         key: "operations",
@@ -78,6 +66,8 @@ const adminTabs = [
 const isOperationsArea = (): boolean =>
     route().current("admin.home") ||
     route().current("admin.users") ||
+    route().current("admin.archive") ||
+    route().current("admin.time-tracking.*") ||
     route().current("admin.sync-logs") ||
     route().current("admin.onboarding") ||
     route().current("admin.onboarding.*") ||
@@ -96,8 +86,6 @@ const isTimeTrackingArea = (): boolean => route().current("admin.time-tracking.*
 
 const isAdminTabActive = (key: (typeof adminTabs)[number]["key"]): boolean => {
     if (key === "operations") return isOperationsArea();
-
-    if (key === "time-tracking") return isTimeTrackingArea();
 
     if (key === "profile") return route().current("profile.*");
 
@@ -198,6 +186,14 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
                     >
                         Profile
                     </Link>
+                    <Link
+                        v-if="!$page.props.auth.is_admin && $page.props.auth.can_view_time_tracking"
+                        :href="route('admin.time-tracking.dashboard')"
+                        class="fieldops-basic-profile-link"
+                        :aria-current="isTimeTrackingArea() ? 'page' : undefined"
+                    >
+                        My Time
+                    </Link>
 
                     <button
                         v-if="!$page.props.auth.is_admin"
@@ -274,7 +270,6 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
                         :title="tab.label"
                         :class="{
                             'fieldops-admin-tab--active': isAdminTabActive(tab.key),
-                            'fieldops-admin-tab--archive': tab.key === 'archive',
                         }"
                         :aria-current="isAdminTabActive(tab.key) ? 'page' : undefined"
                     >
@@ -294,6 +289,7 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
             >
                 <nav class="fieldops-operations-subnav" aria-label="Operations tools">
                     <Link
+                        v-if="$page.props.auth.can_manage_users"
                         :href="route('admin.users')"
                         class="fieldops-operations-subnav-link"
                         :class="{
@@ -303,6 +299,28 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
                     >
                         <UsersIcon class="fieldops-operations-subnav-icon" aria-hidden="true" />
                         <span>Staff</span>
+                    </Link>
+                    <Link
+                        :href="route('admin.time-tracking.dashboard')"
+                        class="fieldops-operations-subnav-link"
+                        :class="{
+                            'fieldops-operations-subnav-link--active': isTimeTrackingArea(),
+                        }"
+                        :aria-current="isTimeTrackingArea() ? 'page' : undefined"
+                    >
+                        <ClockIcon class="fieldops-operations-subnav-icon" aria-hidden="true" />
+                        <span>Time Tracking</span>
+                    </Link>
+                    <Link
+                        :href="route('admin.archive')"
+                        class="fieldops-operations-subnav-link"
+                        :class="{
+                            'fieldops-operations-subnav-link--active': route().current('admin.archive'),
+                        }"
+                        :aria-current="route().current('admin.archive') ? 'page' : undefined"
+                    >
+                        <ArchiveBoxIcon class="fieldops-operations-subnav-icon" aria-hidden="true" />
+                        <span>Archive</span>
                     </Link>
                     <Link
                         v-if="$page.props.auth.can_view_sync_logs"
@@ -317,7 +335,7 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
                         <span>Logs</span>
                     </Link>
                     <Link
-                        v-if="$page.props.auth.can_view_sync_logs"
+                        v-if="$page.props.auth.can_manage_integrations"
                         :href="route('admin.onboarding.access')"
                         class="fieldops-operations-subnav-link"
                         :class="{
@@ -333,7 +351,7 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
             </div>
 
             <div
-                v-if="$page.props.auth.is_admin && isOnboardingArea() && $page.props.auth.onboarding_area_unlocked"
+                v-if="$page.props.auth.can_manage_integrations && isOnboardingArea() && $page.props.auth.onboarding_area_unlocked"
                 class="fieldops-operations-subnav-shell"
             >
                 <nav class="fieldops-operations-subnav" aria-label="Onboarding and integrations">
@@ -401,6 +419,7 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
                         <span>Dashboard</span>
                     </Link>
                     <Link
+                        v-if="$page.props.auth.can_review_time_entries"
                         :href="route('admin.time-tracking.review')"
                         class="fieldops-operations-subnav-link"
                         :class="{
@@ -412,6 +431,7 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
                         <span>Review</span>
                     </Link>
                     <Link
+                        v-if="$page.props.auth.can_view_financial_time_entries"
                         :href="route('admin.time-tracking.payroll')"
                         class="fieldops-operations-subnav-link"
                         :class="{
@@ -423,6 +443,7 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
                         <span>Payroll</span>
                     </Link>
                     <Link
+                        v-if="$page.props.auth.can_view_financial_time_entries"
                         :href="route('admin.time-tracking.billing')"
                         class="fieldops-operations-subnav-link"
                         :class="{
@@ -434,6 +455,7 @@ onBeforeUnmount(() => window.removeEventListener("fieldops:global-search-request
                         <span>Billing</span>
                     </Link>
                     <Link
+                        v-if="$page.props.auth.can_view_time_entry_exceptions"
                         :href="route('admin.time-tracking.exceptions')"
                         class="fieldops-operations-subnav-link"
                         :class="{

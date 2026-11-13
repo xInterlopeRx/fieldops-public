@@ -10,6 +10,7 @@ import {
     XMarkIcon,
 } from "@heroicons/vue/24/outline";
 import { useSwipeNavigation } from "@/Composables/useSwipeNavigation";
+import { usePressAndHold } from "@/Composables/usePressAndHold";
 import { useWorkOrderStatus } from "@/Composables/useWorkOrderStatus";
 import ClearableSearchInput from "@/Components/ClearableSearchInput.vue";
 import type { GlobalSearchResult } from "@/Composables/useGlobalSearchAutocomplete";
@@ -137,23 +138,54 @@ interface CustomerAddressForm {
     country: string;
 }
 
+const emptyCustomerAddressForm = (): CustomerAddressForm => ({
+    line1: "",
+    line2: "",
+    line3: "",
+    line4: "",
+    line5: "",
+    city: "",
+    country_subdivision_code: "",
+    postal_code: "",
+    country: "",
+});
+
 interface CustomerAddressDefaults {
     billing: CustomerAddressFields;
     shipping: CustomerAddressFields;
 }
 
+interface NewClientSiteDraft {
+    name: string;
+    addressSource: "billing" | "shipping";
+    address: CustomerAddressForm;
+}
+
+interface NewClientProjectDraft {
+    name: string;
+}
+
+interface CustomerContact {
+    id: number;
+    contact_type: string;
+    first_name: string | null;
+    last_name: string | null;
+    email: string | null;
+    phone: string | null;
+}
+
+interface CustomerSite {
+    id: number;
+    name: string;
+    address: string | null;
+    primary_contact: CustomerContact | null;
+}
+
 interface CustomerDetail extends CustomerSummary {
     quickbooks_sync: CustomerQuickBooksSync;
     address_defaults: CustomerAddressDefaults;
-    contacts: Array<{
-        id: number;
-        contact_type: string;
-        first_name: string | null;
-        last_name: string | null;
-        email: string | null;
-        phone: string | null;
-    }>;
-    sites: Array<{ id: number; name: string; address: string | null }>;
+    contacts: CustomerContact[];
+    sites: CustomerSite[];
 }
 
 interface WorkOrderAttachment {
@@ -528,6 +560,35 @@ const getVisitSlotHeight = (visit: Visit): string => {
     return `${hours * 48 - 4}px`;
 };
 
+const earliestAvailableStart = (date: Date): Date => {
+    const day = startOfDay(date);
+    const visitDurationMinutes = 60;
+    const firstStartMinute = 9 * 60;
+    const lastStartMinute = 15 * 60 - visitDurationMinutes;
+
+    for (let minuteOfDay = firstStartMinute; minuteOfDay <= lastStartMinute; minuteOfDay += 15) {
+        const candidate = new Date(day);
+        candidate.setMinutes(minuteOfDay, 0, 0);
+        const candidateEnd = candidate.getTime() + visitDurationMinutes * 60_000;
+        const overlapsVisit = visitsForDate(day).some((visit) => {
+            const status = visit.workOrder?.status ?? visit.work_order?.status ?? visit.status;
+            if (status === "cancelled") return false;
+
+            const visitStart = new Date(visit.scheduled_at).getTime();
+            const visitEnd = visitStart + Math.max(1, visit.duration_minutes ?? 60) * 60_000;
+
+            return candidate.getTime() < visitEnd && candidateEnd > visitStart;
+        });
+
+        if (!overlapsVisit) return candidate;
+    }
+
+    const endOfSuggestedWindow = new Date(day);
+    endOfSuggestedWindow.setHours(15, 0, 0, 0);
+
+    return endOfSuggestedWindow;
+};
+
 const formatDayNumber = (date: Date): string =>
     date.toLocaleDateString(undefined, { day: "numeric" });
 
@@ -551,30 +612,14 @@ const clientForm = useForm({
     last_name: "",
     email: "",
     phone: "",
-    billing_address: {
-        line1: "",
-        line2: "",
-        line3: "",
-        line4: "",
-        line5: "",
-        city: "",
-        country_subdivision_code: "",
-        postal_code: "",
-        country: "",
-    },
-    shipping_address: {
-        line1: "",
-        line2: "",
-        line3: "",
-        line4: "",
-        line5: "",
-        city: "",
-        country_subdivision_code: "",
-        postal_code: "",
-        country: "",
-    },
+    billing_address: emptyCustomerAddressForm(),
+    shipping_address: emptyCustomerAddressForm(),
+    shipping_address_same_as_billing: false,
+    sites: [] as NewClientSiteDraft[],
+    projects: [] as NewClientProjectDraft[],
     notes: "",
 });
+const shippingAddressSameAsBilling = ref(false);
 const quickBooksCustomerFormError = computed(
     () => (clientForm.errors as unknown as Record<string, string | undefined>).quickbooks,
 );
@@ -590,6 +635,57 @@ const addressFormValues = (address: CustomerAddressFields): CustomerAddressForm 
     postal_code: address.postal_code ?? "",
     country: address.country ?? "",
 });
+
+const addressDraftSummary = (address: CustomerAddressForm): string =>
+    [
+        [address.line1, address.line2, address.line3, address.line4, address.line5]
+            .filter(Boolean)
+            .join(", "),
+        [address.city, address.country_subdivision_code, address.postal_code]
+            .filter(Boolean)
+            .join(" "),
+        address.country,
+    ]
+        .filter(Boolean)
+        .join(" · ");
+
+const addClientSite = (addressSource: NewClientSiteDraft["addressSource"]): void => {
+    const address = clientForm[`${addressSource}_address`];
+    const sourceSiteCount = clientForm.sites.filter(
+        (site) => site.addressSource === addressSource,
+    ).length;
+    const sourceLabel = addressSource === "billing" ? "Billing" : "Shipping";
+
+    clientForm.sites.push({
+        name: `${sourceLabel} Site${sourceSiteCount ? ` ${sourceSiteCount + 1}` : ""}`,
+        addressSource,
+        address: { ...address },
+    });
+};
+
+const removeClientSite = (index: number): void => {
+    clientForm.sites.splice(index, 1);
+};
+
+const addClientProject = (): void => {
+    clientForm.projects.push({ name: "" });
+};
+
+const removeClientProject = (index: number): void => {
+    clientForm.projects.splice(index, 1);
+};
+
+const copyBillingAddressToShipping = (): void => {
+    clientForm.shipping_address = { ...clientForm.billing_address };
+};
+
+watch(
+    () => ({ ...clientForm.billing_address }),
+    () => {
+        if (shippingAddressSameAsBilling.value) copyBillingAddressToShipping();
+    },
+    { deep: true },
+);
 const jobFormMode = ref<"create" | "edit">("create");
 const jobPanelMode = ref<"view" | "form" | "revisit">("form");
 const selectedWorkOrder = ref<WorkOrderDetail | null>(null);
@@ -607,7 +703,7 @@ const timeEntryTimerVisits = computed<TimeEntryTimerVisit[]>(() =>
 const selectedProject = ref<ProjectDetail | null>(null);
 const jobCustomerQuery = ref("");
 const jobCustomer = ref<CustomerDetail | null>(null);
-const selectedJobContactIndex = ref(0);
+const jobSiteQuery = ref("");
 const jobCustomerMode = ref<"search" | "create">("search");
 const jobSiteMode = ref<"select" | "create">("select");
 const jobForm = useForm({
@@ -672,52 +768,137 @@ const openMenu = () => {
     fabMode.value = fabMode.value === "menu" ? "default" : "menu";
 };
 
-const openClientForm = () => {
-    closeFab();
-    clientForm.reset();
-    clientForm.clearErrors();
-    clientFormMode.value = "create";
-    fabMode.value = "client";
+type JobContactRole =
+    | "client_contact"
+    | "technical_contact"
+    | "project_manager"
+    | "contractor_check_in";
+
+const jobContactFieldNames: Record<JobContactRole, { id: string; prefix: string }> = {
+    client_contact: { id: "client_contact_id", prefix: "client_contact" },
+    technical_contact: { id: "technical_contact_id", prefix: "technical_contact" },
+    project_manager: { id: "project_manager_contact_id", prefix: "project_manager" },
+    contractor_check_in: { id: "contractor_check_in_contact_id", prefix: "contractor_check_in" },
 };
 
-const openJobForm = () => {
-    closeFab();
-    jobForm.reset();
-    jobForm.clearErrors();
-    jobFormMode.value = "create";
-    jobPanelMode.value = "form";
-    selectedWorkOrder.value = null;
-    selectedTimerVisitId.value = null;
-    selectedProject.value = null;
-    jobCustomer.value = null;
-    jobCustomerMode.value = "search";
-    jobCustomerQuery.value = "";
+const setJobContactSnapshot = (
+    role: JobContactRole,
+    contact: CustomerContact | null,
+): void => {
+    const fields = jobContactFieldNames[role];
+    const form = jobForm as unknown as Record<string, string | number | null>;
+
+    form[fields.id] = contact?.id ?? null;
+    form[`${fields.prefix}_name`] = contact
+        ? [contact.first_name, contact.last_name].filter(Boolean).join(" ")
+        : "";
+    form[`${fields.prefix}_phone`] = contact?.phone ?? "";
+    form[`${fields.prefix}_email`] = contact?.email ?? "";
+};
+
+const defaultJobClientContact = (): CustomerContact | null =>
+    jobCustomer.value?.contacts.find((contact) => contact.contact_type === "primary") ?? null;
+
+const populateJobClientContact = (contact: CustomerContact | null): void => {
+    if (contact) {
+        setJobContactSnapshot("client_contact", contact);
+        return;
+    }
+
+    setJobContactSnapshot("client_contact", null);
+    if (jobCustomer.value) {
+        jobForm.client_contact_name = [
+            jobCustomer.value.first_name,
+            jobCustomer.value.last_name,
+        ].filter(Boolean).join(" ");
+        jobForm.client_contact_phone = jobCustomer.value.phone ?? "";
+        jobForm.client_contact_email = jobCustomer.value.email ?? "";
+    }
+};
+
+const applySelectedJobSiteContact = (): void => {
+    const site = jobCustomer.value?.sites.find(
+        (item) => item.id === jobForm.site_id,
+    );
+
+    populateJobClientContact(site?.primary_contact ?? defaultJobClientContact());
+};
+
+watch(() => jobForm.site_id, () => {
+    if (jobFormMode.value === "create") applySelectedJobSiteContact();
+});
+
+const clearJobContacts = (): void => {
+    (Object.keys(jobContactFieldNames) as JobContactRole[]).forEach((role) =>
+        setJobContactSnapshot(role, null),
+    );
+};
+
+const startNewJobSite = (): void => {
+    jobSiteMode.value = "create";
+    jobForm.site_id = null;
+    applySelectedJobSiteContact();
+};
+
+const chooseExistingJobSite = (): void => {
     jobSiteMode.value = "select";
-    fabMode.value = "job";
+    jobForm.site_id = jobCustomer.value?.sites[0]?.id ?? null;
+    applySelectedJobSiteContact();
 };
 
 const openJobFormAtSlot = (date: Date, hour: number): void => {
-    openJobForm();
-    jobForm.status = "scheduled";
-
     const scheduledAt = new Date(date);
     scheduledAt.setHours(hour, 0, 0, 0);
-    jobForm.scheduled_at = localDateTimeValue(scheduledAt);
+    openJobFormAtDateTime(scheduledAt);
+};
+
+const openJobFormAtDateTime = (scheduledAt: Date): void => {
+    router.visit(route("admin.jobs", {
+        create_job: 1,
+        status: "scheduled",
+        scheduled_at: localDateTimeValue(scheduledAt),
+    }));
+};
+
+const focusCalendarDay = (date: Date): void => {
+    const selectedDay = startOfDay(date);
+
+    if (!isSameDay(selectedDate.value, selectedDay)) {
+        selectedDate.value = selectedDay;
+    }
+
+    if (selectedDay.getMonth() !== currentDate.value.getMonth()
+        || selectedDay.getFullYear() !== currentDate.value.getFullYear()) {
+        currentDate.value = new Date(selectedDay);
+    }
 };
 
 const openJobFormForDate = (date: Date): void => {
-    const selectedDay = startOfDay(date);
-    selectedDate.value = selectedDay;
+    focusCalendarDay(date);
+    openJobFormAtDateTime(earliestAvailableStart(date));
+};
 
-    if (selectedDay.getMonth() !== currentDate.value.getMonth()) {
-        currentDate.value = new Date(
-            selectedDay.getFullYear(),
-            selectedDay.getMonth(),
-            1,
-        );
-    }
+const dateFromKey = (dateKey: string): Date => {
+    const [year, month, day] = dateKey.split("-").map(Number);
 
-    openJobFormAtSlot(selectedDay, 8);
+    return new Date(year, month - 1, day);
+};
+
+const calendarDayPress = usePressAndHold(
+    (dateKey: string) => focusCalendarDay(dateFromKey(dateKey)),
+    (dateKey: string) => openJobFormForDate(dateFromKey(dateKey)),
+    550,
+);
+
+const openAddJobForSelectedDate = (): void => {
+    openJobFormAtDateTime(earliestAvailableStart(selectedDate.value));
+};
+
+const openAddProjectForSelectedDate = (): void => {
+    router.visit(route("admin.projects", {
+        create_project: 1,
+        scheduled_at: localDateTimeValue(earliestAvailableStart(selectedDate.value)),
+    }));
 };
 
 const selectJobCustomer = async (customerId: number) => {
@@ -742,60 +923,54 @@ const selectJobCustomer = async (customerId: number) => {
     jobCustomerMode.value = "search";
     jobForm.customer_id = payload.data.id;
     jobForm.customer_name = "";
-    const primaryContact = payload.data.contacts.find(
-        (contact) => contact.contact_type === "primary",
-    );
-    jobForm.client_contact_name = [
-        primaryContact?.first_name ?? payload.data.first_name,
-        primaryContact?.last_name ?? payload.data.last_name,
-    ]
-        .filter(Boolean)
-        .join(" ");
-    jobForm.client_contact_phone =
-        primaryContact?.phone ?? payload.data.phone ?? "";
-    jobForm.client_contact_email =
-        primaryContact?.email ?? payload.data.email ?? "";
-    selectedJobContactIndex.value = Math.max(
-        0,
-        payload.data.contacts.findIndex(
-            (contact) => contact.contact_type === "primary",
-        ),
-    );
+    clearJobContacts();
+    jobSiteMode.value = "select";
+    jobSiteQuery.value = "";
     jobForm.site_id = payload.data.sites[0]?.id ?? null;
     jobCustomerQuery.value = payload.data.name;
+    applySelectedJobSiteContact();
 };
 
 const selectJobCustomerSuggestion = (result: GlobalSearchResult): void => {
     if (result.type === "client") void selectJobCustomer(result.id);
 };
 
-const selectJobContact = (index: number): void => {
-    if (!jobCustomer.value) return;
+const selectJobSiteSuggestion = async (result: GlobalSearchResult): Promise<void> => {
+    if (result.type !== "site" || result.parent_id === undefined) return;
 
-    const contact = jobCustomer.value.contacts[index];
+    try {
+        await selectJobCustomer(result.parent_id);
+    } catch {
+        jobForm.setError("site_id", "Could not load this Site. Try searching again.");
 
-    if (!contact) return;
+        return;
+    }
 
-    selectedJobContactIndex.value = index;
-    jobForm.client_contact_id = contact.id;
-    jobForm.client_contact_name = [contact.first_name, contact.last_name]
-        .filter(Boolean)
-        .join(" ");
-    jobForm.client_contact_phone = contact.phone ?? "";
-    jobForm.client_contact_email = contact.email ?? "";
+    const site = jobCustomer.value?.sites.find((item) => item.id === result.id);
+
+    if (!site) {
+        jobForm.setError("site_id", "This Site is no longer available for the selected Customer.");
+
+        return;
+    }
+
+    jobSiteMode.value = "select";
+    jobSiteQuery.value = "";
+    jobForm.clearErrors("site_id");
+    jobForm.site_id = site.id;
+    applySelectedJobSiteContact();
 };
 
 const selectJobContactRole = (
-    role:
-        | "client_contact"
-        | "technical_contact"
-        | "project_manager"
-        | "contractor_check_in",
+    role: JobContactRole,
     contactId: number | null,
 ): void => {
-    if (!jobCustomer.value || contactId === null) {
+    if (contactId === null) {
+        setJobContactSnapshot(role, null);
         return;
     }
+
+    if (!jobCustomer.value) return;
 
     const contact = jobCustomer.value.contacts.find(
         (item) => item.id === contactId,
@@ -803,31 +978,11 @@ const selectJobContactRole = (
 
     if (!contact) return;
 
-    const idField =
-        role === "project_manager"
-            ? "project_manager_contact_id"
-            : role === "contractor_check_in"
-              ? "contractor_check_in_contact_id"
-              : `${role}_id`;
-    (jobForm as unknown as Record<string, string | number | null>)[idField] =
-        contact.id;
-    (jobForm as unknown as Record<string, string | number | null>)[
-        `${role}_name`
-    ] = [contact.first_name, contact.last_name].filter(Boolean).join(" ");
-    (jobForm as unknown as Record<string, string | number | null>)[
-        `${role}_phone`
-    ] = contact.phone ?? "";
-    (jobForm as unknown as Record<string, string | number | null>)[
-        `${role}_email`
-    ] = contact.email ?? "";
+    setJobContactSnapshot(role, contact);
 };
 
 const handleJobContactRoleChange = (
-    role:
-        | "client_contact"
-        | "technical_contact"
-        | "project_manager"
-        | "contractor_check_in",
+    role: JobContactRole,
     event: Event,
 ): void => {
     const value = Number((event.target as HTMLSelectElement).value);
@@ -839,7 +994,10 @@ const clearJobCustomer = () => {
     jobCustomerMode.value = "search";
     jobForm.customer_id = null;
     jobForm.site_id = null;
+    clearJobContacts();
     jobCustomerQuery.value = "";
+    jobSiteQuery.value = "";
+    jobSiteMode.value = "select";
 };
 
 const startNewJobCustomer = () => {
@@ -847,6 +1005,9 @@ const startNewJobCustomer = () => {
     jobCustomerMode.value = "create";
     jobCustomerQuery.value = "";
     jobForm.customer_id = null;
+    jobForm.site_id = null;
+    clearJobContacts();
+    jobSiteQuery.value = "";
 };
 
 const handleJobFiles = (event: Event) => {
@@ -1032,12 +1193,6 @@ const openExistingJob = async (workOrderId: number, visitId?: number) => {
         jobPanelMode.value = "view";
         jobCustomer.value = payload.data.site.customer;
         jobCustomerMode.value = "search";
-        selectedJobContactIndex.value = Math.max(
-            0,
-            payload.data.site.customer.contacts.findIndex(
-                (contact) => contact.contact_type === "primary",
-            ),
-        );
         jobCustomerQuery.value = payload.data.site.customer.name;
         jobSiteMode.value = "select";
         jobForm.defaults({
@@ -1204,20 +1359,31 @@ const uploadViewAttachments = () => {
 const beginCustomerEdit = () => {
     if (!selectedCustomer.value) return;
 
+    const billingAddress = addressFormValues(selectedCustomer.value.address_defaults.billing);
+    const shippingAddress = addressFormValues(selectedCustomer.value.address_defaults.shipping);
     clientForm.defaults({
         name: selectedCustomer.value.name,
         first_name: selectedCustomer.value.first_name ?? "",
         last_name: selectedCustomer.value.last_name ?? "",
         email: selectedCustomer.value.email ?? "",
         phone: selectedCustomer.value.phone ?? "",
-        billing_address: addressFormValues(selectedCustomer.value.address_defaults.billing),
-        shipping_address: addressFormValues(selectedCustomer.value.address_defaults.shipping),
+        billing_address: billingAddress,
+        shipping_address: shippingAddress,
+        shipping_address_same_as_billing: false,
+        sites: [],
+        projects: [],
         notes: selectedCustomer.value.notes ?? "",
     });
     clientForm.reset();
     clientForm.clearErrors();
+    shippingAddressSameAsBilling.value = addressDraftsMatch(billingAddress, shippingAddress);
     clientFormMode.value = "edit";
 };
+
+const addressDraftsMatch = (left: CustomerAddressForm, right: CustomerAddressForm): boolean =>
+    Object.keys(left).every((key) =>
+        left[key as keyof CustomerAddressForm].trim() === right[key as keyof CustomerAddressForm].trim(),
+    );
 
 const cancelCustomerEdit = () => {
     clientForm.reset();
@@ -1226,6 +1392,8 @@ const cancelCustomerEdit = () => {
 };
 
 const submitClient = () => {
+    clientForm.shipping_address_same_as_billing = shippingAddressSameAsBilling.value;
+
     if (clientFormMode.value === "edit" && selectedCustomer.value) {
         clientForm.put(route("customers.update", selectedCustomer.value.id), {
             preserveScroll: true,
@@ -1293,8 +1461,28 @@ onMounted(() => {
     nextTick(scrollToBusinessHours);
 
     const query = new URLSearchParams(window.location.search);
+    const createClient = query.get("create_client");
+    const createProject = query.get("create_project");
+    const createJob = query.get("create_job");
+    const newJobCustomer = Number(query.get("create_job_for_customer"));
     const requestedJob = Number(query.get("open_job"));
-    if (Number.isSafeInteger(requestedJob) && requestedJob > 0) {
+    if (createClient === "1") {
+        router.visit(route("admin.customers", { create_client: 1 }));
+    } else if (createProject === "1") {
+        router.visit(route("admin.projects", {
+            create_project: 1,
+            scheduled_at: query.get("scheduled_at") || undefined,
+        }));
+    } else if (Number.isSafeInteger(newJobCustomer) && newJobCustomer > 0) {
+        router.visit(route("admin.jobs", { create_job: 1, customer_id: newJobCustomer }));
+    } else if (createJob === "1") {
+        router.visit(route("admin.jobs", {
+            create_job: 1,
+            scheduled_at: query.get("scheduled_at") || undefined,
+            status: query.get("status") || undefined,
+            customer_id: query.get("customer_id") || undefined,
+        }));
+    } else if (Number.isSafeInteger(requestedJob) && requestedJob > 0) {
         void openExistingJob(requestedJob);
     } else {
         const requestedCustomer = Number(query.get("open_customer"));
@@ -1423,6 +1611,7 @@ const updateCustomerForTarget = (
         if (jobForm.site_id === null && customer.sites.length > 0) {
             jobForm.site_id = customer.sites[0].id;
         }
+        applySelectedJobSiteContact();
     }
 };
 
@@ -2540,7 +2729,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                 mode="out-in"
                 @after-enter="scrollToBusinessHours"
             >
-                <div :key="currentView + '-' + navigationLabel">
+                <div :key="currentView">
                     <div
                         v-if="currentView === 'month'"
                         class="p-0 sm:p-4 md:p-6"
@@ -2576,8 +2765,9 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                                     <button
                                         type="button"
                                         class="calendar-cell-add"
-                                        :aria-label="`Add a job on ${day.date.toLocaleDateString()}`"
-                                        @click="openJobFormForDate(day.date)"
+                                        :aria-label="`Select ${day.date.toLocaleDateString()}. Double click or press and hold to add a Job.`"
+                                        v-on="calendarDayPress(day.dateKey)"
+                                        @dblclick="openJobFormForDate(day.date)"
                                     >
                                         <span class="calendar-cell-add__top">
                                             <span
@@ -3087,7 +3277,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                         {{ selectedProject.project_number || "Project" }}
                     </div>
                     <div>
-                        <div class="fieldops-client-label">Client</div>
+                        <div class="fieldops-client-label">Customer</div>
                         <div>{{ selectedProject.customer.name }}</div>
                     </div>
                     <div>
@@ -3151,14 +3341,14 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                         >
                             {{
                                 clientFormMode === "create"
-                                    ? "New Client"
-                                    : "Client"
+                                    ? "New Customer"
+                                    : "Customer"
                             }}
                         </p>
                         <h2 class="text-lg font-bold">
                             {{
                                 clientFormMode === "create"
-                                    ? "Add client"
+                                    ? "Add Customer"
                                     : selectedCustomer?.name
                             }}
                         </h2>
@@ -3166,7 +3356,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                     <button
                         v-if="clientFormMode === 'view'"
                         type="button"
-                        aria-label="Edit client"
+                        aria-label="Edit Customer"
                         class="fieldops-icon-button fieldops-edit-action"
                         @click="beginCustomerEdit"
                     >
@@ -3339,7 +3529,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                     </div>
                     <div>
                         <label for="client-name" class="fieldops-client-label"
-                            >Client name</label
+                            >Customer name</label
                         >
                         <input
                             id="client-name"
@@ -3355,98 +3545,170 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                             {{ clientForm.errors.name }}
                         </p>
                     </div>
-                    <div>
-                        <label
-                            for="client-first-name"
-                            class="fieldops-client-label"
-                            >First name</label
-                        >
-                        <input
-                            id="client-first-name"
-                            v-model="clientForm.first_name"
-                            class="fieldops-client-input"
-                        />
-                    </div>
-                    <div>
-                        <label
-                            for="client-last-name"
-                            class="fieldops-client-label"
-                            >Last name</label
-                        >
-                        <input
-                            id="client-last-name"
-                            v-model="clientForm.last_name"
-                            class="fieldops-client-input"
-                        />
-                    </div>
-                    <div>
-                        <label for="client-email" class="fieldops-client-label"
-                            >Email</label
-                        >
-                        <input
-                            id="client-email"
-                            v-model="clientForm.email"
-                            type="email"
-                            class="fieldops-client-input"
-                        />
-                        <p
-                            v-if="clientForm.errors.email"
-                            class="fieldops-client-error"
-                        >
-                            {{ clientForm.errors.email }}
-                        </p>
-                    </div>
-                    <div>
-                        <label for="client-phone" class="fieldops-client-label"
-                            >Phone</label
-                        >
-                        <input
-                            id="client-phone"
-                            v-model="clientForm.phone"
-                            type="tel"
-                            class="fieldops-client-input"
-                        />
-                        <p
-                            v-if="clientForm.errors.phone"
-                            class="fieldops-client-error"
-                        >
-                            {{ clientForm.errors.phone }}
-                        </p>
-                    </div>
-                    <fieldset class="space-y-2 rounded-xl border border-fieldops-blue/20 p-3">
+                    <section class="grid gap-3" aria-labelledby="client-primary-contact-heading">
+                        <h3 id="client-primary-contact-heading" class="fieldops-client-label mb-0">Primary contact</h3>
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <label for="client-first-name" class="fieldops-client-label mb-0">
+                                First name
+                                <input id="client-first-name" v-model="clientForm.first_name" class="fieldops-client-input mt-1" />
+                            </label>
+                            <label for="client-last-name" class="fieldops-client-label mb-0">
+                                Last name
+                                <input id="client-last-name" v-model="clientForm.last_name" class="fieldops-client-input mt-1" />
+                            </label>
+                            <label for="client-email" class="fieldops-client-label mb-0">
+                                Email
+                                <input id="client-email" v-model="clientForm.email" type="email" class="fieldops-client-input mt-1" />
+                                <span v-if="clientForm.errors.email" class="fieldops-client-error">{{ clientForm.errors.email }}</span>
+                            </label>
+                            <label for="client-phone" class="fieldops-client-label mb-0">
+                                Phone
+                                <input id="client-phone" v-model="clientForm.phone" type="tel" class="fieldops-client-input mt-1" />
+                                <span v-if="clientForm.errors.phone" class="fieldops-client-error">{{ clientForm.errors.phone }}</span>
+                            </label>
+                        </div>
+                    </section>
+                    <fieldset class="grid gap-3 rounded-xl border border-fieldops-blue/20 p-3 sm:p-4">
                         <legend class="fieldops-client-label px-1">Billing address</legend>
-                        <div class="grid gap-2 sm:grid-cols-2">
-                            <input v-model="clientForm.billing_address.line1" class="fieldops-client-input" placeholder="Street address 1" aria-label="Billing street address 1" />
-                            <input v-model="clientForm.billing_address.line2" class="fieldops-client-input" placeholder="Street address 2" aria-label="Billing street address 2" />
-                            <input v-model="clientForm.billing_address.line3" class="fieldops-client-input" placeholder="Street address 3" aria-label="Billing street address 3" />
-                            <input v-model="clientForm.billing_address.line4" class="fieldops-client-input" placeholder="Street address 4" aria-label="Billing street address 4" />
-                            <input v-model="clientForm.billing_address.line5" class="fieldops-client-input" placeholder="Street address 5" aria-label="Billing street address 5" />
-                            <input v-model="clientForm.billing_address.city" class="fieldops-client-input" placeholder="City" aria-label="Billing city" />
-                            <input v-model="clientForm.billing_address.country_subdivision_code" class="fieldops-client-input" placeholder="State / province" aria-label="Billing state or province" />
-                            <input v-model="clientForm.billing_address.postal_code" class="fieldops-client-input" placeholder="Postal code" aria-label="Billing postal code" />
-                            <input v-model="clientForm.billing_address.country" class="fieldops-client-input sm:col-span-2" placeholder="Country" aria-label="Billing country" />
+                        <div class="flex justify-end">
+                            <button
+                                v-if="clientFormMode === 'create'"
+                                type="button"
+                                class="fieldops-secondary-action fieldops-add-action"
+                                @click="addClientSite('billing')"
+                            >
+                                Add site
+                            </button>
+                        </div>
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <label class="fieldops-client-label mb-0 sm:col-span-2">
+                                Street address or PO Box
+                                <input v-model="clientForm.billing_address.line1" class="fieldops-client-input mt-1" placeholder="Street address or PO Box" aria-label="Billing street address" />
+                            </label>
+                            <label class="fieldops-client-label mb-0 sm:col-span-2">
+                                Address line 2
+                                <input v-model="clientForm.billing_address.line2" class="fieldops-client-input mt-1" placeholder="Unit, suite, etc. (optional)" aria-label="Billing address line 2" />
+                            </label>
+                            <label class="fieldops-client-label mb-0">
+                                City
+                                <input v-model="clientForm.billing_address.city" class="fieldops-client-input mt-1" placeholder="City" aria-label="Billing city" />
+                            </label>
+                            <label class="fieldops-client-label mb-0">
+                                State
+                                <select v-model="clientForm.billing_address.country_subdivision_code" class="fieldops-client-input mt-1" aria-label="Billing state">
+                                    <option value="">Select a state</option>
+                                    <option v-for="state in page.props.us_states" :key="state.value" :value="state.value">{{ state.label }}</option>
+                                </select>
+                            </label>
+                            <label class="fieldops-client-label mb-0">
+                                ZIP code
+                                <input v-model="clientForm.billing_address.postal_code" class="fieldops-client-input mt-1" placeholder="ZIP code" aria-label="Billing ZIP code" />
+                            </label>
+                            <label class="fieldops-client-label mb-0">
+                                Country (optional)
+                                <input v-model="clientForm.billing_address.country" class="fieldops-client-input mt-1" placeholder="Country" aria-label="Billing country" />
+                            </label>
                         </div>
                         <p v-if="clientForm.errors['billing_address.line1']" class="fieldops-client-error">
                             {{ clientForm.errors['billing_address.line1'] }}
                         </p>
                     </fieldset>
-                    <fieldset class="space-y-2 rounded-xl border border-fieldops-blue/20 p-3">
+                    <fieldset class="grid gap-3 rounded-xl border border-fieldops-blue/20 p-3 sm:p-4">
                         <legend class="fieldops-client-label px-1">Shipping address</legend>
-                        <div class="grid gap-2 sm:grid-cols-2">
-                            <input v-model="clientForm.shipping_address.line1" class="fieldops-client-input" placeholder="Street address 1" aria-label="Shipping street address 1" />
-                            <input v-model="clientForm.shipping_address.line2" class="fieldops-client-input" placeholder="Street address 2" aria-label="Shipping street address 2" />
-                            <input v-model="clientForm.shipping_address.line3" class="fieldops-client-input" placeholder="Street address 3" aria-label="Shipping street address 3" />
-                            <input v-model="clientForm.shipping_address.line4" class="fieldops-client-input" placeholder="Street address 4" aria-label="Shipping street address 4" />
-                            <input v-model="clientForm.shipping_address.line5" class="fieldops-client-input" placeholder="Street address 5" aria-label="Shipping street address 5" />
-                            <input v-model="clientForm.shipping_address.city" class="fieldops-client-input" placeholder="City" aria-label="Shipping city" />
-                            <input v-model="clientForm.shipping_address.country_subdivision_code" class="fieldops-client-input" placeholder="State / province" aria-label="Shipping state or province" />
-                            <input v-model="clientForm.shipping_address.postal_code" class="fieldops-client-input" placeholder="Postal code" aria-label="Shipping postal code" />
-                            <input v-model="clientForm.shipping_address.country" class="fieldops-client-input sm:col-span-2" placeholder="Country" aria-label="Shipping country" />
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <label class="inline-flex min-h-10 items-center gap-2 text-sm text-gray-700">
+                                <input
+                                    v-model="shippingAddressSameAsBilling"
+                                    type="checkbox"
+                                    class="h-4 w-4 rounded border-gray-300 text-blue-700 focus:ring-blue-700"
+                                    @change="shippingAddressSameAsBilling && copyBillingAddressToShipping()"
+                                />
+                                Same as billing
+                            </label>
+                            <button
+                                v-if="clientFormMode === 'create'"
+                                type="button"
+                                class="fieldops-secondary-action fieldops-add-action"
+                                @click="addClientSite('shipping')"
+                            >
+                                Add site
+                            </button>
+                        </div>
+                        <p v-if="shippingAddressSameAsBilling" class="text-sm text-gray-600">
+                            The billing address is also saved as the Customer’s default shipping address.
+                        </p>
+                        <div v-else class="grid gap-3 sm:grid-cols-2">
+                            <label class="fieldops-client-label mb-0 sm:col-span-2">
+                                Street address or PO Box
+                                <input v-model="clientForm.shipping_address.line1" class="fieldops-client-input mt-1" placeholder="Street address or PO Box" aria-label="Shipping street address" />
+                            </label>
+                            <label class="fieldops-client-label mb-0 sm:col-span-2">
+                                Address line 2
+                                <input v-model="clientForm.shipping_address.line2" class="fieldops-client-input mt-1" placeholder="Unit, suite, etc. (optional)" aria-label="Shipping address line 2" />
+                            </label>
+                            <label class="fieldops-client-label mb-0">
+                                City
+                                <input v-model="clientForm.shipping_address.city" class="fieldops-client-input mt-1" placeholder="City" aria-label="Shipping city" />
+                            </label>
+                            <label class="fieldops-client-label mb-0">
+                                State
+                                <select v-model="clientForm.shipping_address.country_subdivision_code" class="fieldops-client-input mt-1" aria-label="Shipping state">
+                                    <option value="">Select a state</option>
+                                    <option v-for="state in page.props.us_states" :key="state.value" :value="state.value">{{ state.label }}</option>
+                                </select>
+                            </label>
+                            <label class="fieldops-client-label mb-0">
+                                ZIP code
+                                <input v-model="clientForm.shipping_address.postal_code" class="fieldops-client-input mt-1" placeholder="ZIP code" aria-label="Shipping ZIP code" />
+                            </label>
+                            <label class="fieldops-client-label mb-0">
+                                Country (optional)
+                                <input v-model="clientForm.shipping_address.country" class="fieldops-client-input mt-1" placeholder="Country" aria-label="Shipping country" />
+                            </label>
                         </div>
                         <p v-if="clientForm.errors['shipping_address.line1']" class="fieldops-client-error">
                             {{ clientForm.errors['shipping_address.line1'] }}
                         </p>
                     </fieldset>
+                    <section v-if="clientFormMode === 'create'" class="grid gap-3" aria-labelledby="client-sites-heading">
+                        <h3 id="client-sites-heading" class="fieldops-client-label mb-0">Sites</h3>
+                        <article
+                            v-for="(site, index) in clientForm.sites"
+                            :key="`${site.addressSource}-${index}`"
+                            class="grid gap-2 rounded-xl border border-fieldops-blue/20 bg-white/35 p-3"
+                        >
+                            <div class="flex items-center justify-between gap-3">
+                                <p class="text-sm font-semibold text-gray-900">{{ site.addressSource === 'billing' ? 'Billing address' : 'Shipping address' }} site</p>
+                                <button type="button" class="fieldops-workspace-remove" :aria-label="`Remove ${site.name}`" @click="removeClientSite(index)">Remove site</button>
+                            </div>
+                            <label class="fieldops-workspace-field">
+                                Site name
+                                <input v-model="site.name" required maxlength="255" placeholder="e.g. Main office" />
+                            </label>
+                            <p class="text-sm text-gray-600">{{ addressDraftSummary(site.address) || 'No address entered yet. Add an address above or save it for later.' }}</p>
+                            <p v-if="clientForm.errors[`sites.${index}.name`]" class="fieldops-client-error">{{ clientForm.errors[`sites.${index}.name`] }}</p>
+                        </article>
+                        <p v-if="clientForm.sites.length === 0" class="text-sm text-gray-600">No Sites added yet. Add a Site from the Billing or Shipping address above.</p>
+                    </section>
+                    <section v-if="clientFormMode === 'create'" class="grid gap-3" aria-labelledby="client-projects-heading">
+                        <div class="flex items-center justify-between gap-3">
+                            <h3 id="client-projects-heading" class="fieldops-client-label mb-0">Projects</h3>
+                            <button type="button" class="fieldops-secondary-action fieldops-add-action" @click="addClientProject">Add project</button>
+                        </div>
+                        <article
+                            v-for="(project, index) in clientForm.projects"
+                            :key="`new-project-${index}`"
+                            class="grid gap-3 rounded-xl border border-fieldops-blue/20 bg-white/35 p-3 sm:grid-cols-2"
+                        >
+                            <label class="fieldops-workspace-field sm:col-span-2">
+                                Project name
+                                <input v-model="project.name" required maxlength="255" placeholder="Project name" />
+                            </label>
+                            <button type="button" class="fieldops-workspace-remove self-end" :aria-label="`Remove project ${project.name || index + 1}`" @click="removeClientProject(index)">Remove project</button>
+                            <p v-if="clientForm.errors[`projects.${index}.name`]" class="fieldops-client-error sm:col-span-2">{{ clientForm.errors[`projects.${index}.name`] }}</p>
+                        </article>
+                        <p v-if="clientForm.projects.length === 0" class="text-sm text-gray-600">No Projects added yet.</p>
+                    </section>
                     <div>
                         <label for="client-notes" class="fieldops-client-label"
                             >Notes</label
@@ -3508,7 +3770,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                 role="dialog"
                 :aria-label="jobPanelMode === 'view' ? `Job ${selectedWorkOrder?.job_number ?? ''} details` : jobFormMode === 'edit' ? 'Edit Job' : 'New Job form'"
             >
-                <div class="mb-5 flex items-center justify-between">
+                <div class="mb-5 grid grid-cols-[2.75rem_minmax(0,1fr)_auto] items-center gap-2">
                     <button
                         type="button"
                         aria-label="Back"
@@ -3517,7 +3779,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                     >
                         <ArrowLeftIcon class="h-5 w-5" />
                     </button>
-                    <div class="text-center">
+                    <div class="min-w-0 justify-self-center text-center">
                         <p
                             class="text-xs font-bold uppercase tracking-[0.2em] opacity-70"
                         >
@@ -3547,9 +3809,24 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                     >
                         <PencilIcon class="h-5 w-5" />
                     </button>
-                    <span v-else class="h-10 w-10" aria-hidden="true"></span>
+                    <select
+                        v-if="jobPanelMode === 'form'"
+                        id="job-status"
+                        v-model="jobForm.status"
+                        aria-label="Job status"
+                        class="fieldops-status-badge fieldops-job-status-select"
+                        :class="workOrderStatusBadgeClass(jobForm.status)"
+                    >
+                        <option v-for="status in calendarSelectableWorkOrderStatuses" :key="status.value" :value="status.value">
+                            {{ status.label }}
+                        </option>
+                    </select>
+                    <span v-else-if="jobPanelMode !== 'view'" class="h-10 w-10 justify-self-end" aria-hidden="true"></span>
                 </div>
                 <p v-if="archiveError" role="alert" class="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">{{ archiveError }}</p>
+                <p v-if="jobPanelMode === 'form' && (jobForm.errors.status || timerStartConflictError(jobForm.errors) || jobForm.errors.timer_visit_id)" class="fieldops-client-error mb-3">
+                    {{ jobForm.errors.status || timerStartConflictError(jobForm.errors) || jobForm.errors.timer_visit_id }}
+                </p>
 
                 <div
                     v-if="jobPanelMode === 'view' && selectedWorkOrder"
@@ -3696,7 +3973,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                         />
                     </div>
                     <div>
-                        <div class="fieldops-client-label">Client and site</div>
+                        <div class="fieldops-client-label">Customer and site</div>
                         <div>
                             {{ selectedWorkOrder.site.customer.name }} ·
                             {{ selectedWorkOrder.site.name }}
@@ -3717,7 +3994,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                         <div class="whitespace-pre-wrap">{{ selectedWorkOrder.scope || "No scope recorded" }}</div>
                     </div>
                     <div v-if="selectedWorkOrder.client_completion_summary">
-                        <div class="fieldops-client-label">Client completion summary</div>
+                        <div class="fieldops-client-label">Customer completion summary</div>
                         <div class="whitespace-pre-wrap">{{ selectedWorkOrder.client_completion_summary }}</div>
                     </div>
                     <div v-if="selectedWorkOrder.project">
@@ -3763,7 +4040,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                         <div
                             v-for="contact in [
                                 {
-                                    label: 'Client contact',
+                                    label: 'Customer contact',
                                     name: selectedWorkOrder.client_contact_name,
                                     phone: selectedWorkOrder.client_contact_phone,
                                     email: selectedWorkOrder.client_contact_email,
@@ -4033,78 +4310,9 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                             class="fieldops-client-input"
                         />
                     </div>
-                    <div class="grid gap-3 sm:grid-cols-2">
-                        <div
-                            v-for="role in [
-                                {
-                                    label: 'Client contact',
-                                    key: 'client_contact',
-                                    value: jobForm.client_contact_id,
-                                },
-                                {
-                                    label: 'Technical contact',
-                                    key: 'technical_contact',
-                                    value: jobForm.technical_contact_id,
-                                },
-                                {
-                                    label: 'Project manager',
-                                    key: 'project_manager',
-                                    value: jobForm.project_manager_contact_id,
-                                },
-                                {
-                                    label: 'Contractor check-in contact',
-                                    key: 'contractor_check_in',
-                                    value: jobForm.contractor_check_in_contact_id,
-                                },
-                            ]"
-                            :key="role.key"
-                            class="rounded-xl bg-white/35 p-3"
-                        >
-                            <label
-                                :for="`${role.key}-contact-picker`"
-                                class="fieldops-client-label"
-                                >{{ role.label }}</label
-                            >
-                            <select
-                                :id="`${role.key}-contact-picker`"
-                                :value="role.value ?? ''"
-                                class="fieldops-client-input"
-                                :disabled="!jobCustomer?.contacts.length"
-                                @change="
-                                    handleJobContactRoleChange(
-                                        role.key as
-                                            | 'client_contact'
-                                            | 'technical_contact'
-                                            | 'project_manager'
-                                            | 'contractor_check_in',
-                                        $event,
-                                    )
-                                "
-                            >
-                                <option value="">No contact selected</option>
-                                <option
-                                    v-for="contact in jobCustomer?.contacts ||
-                                    []"
-                                    :key="contact.id"
-                                    :value="contact.id"
-                                >
-                                    {{
-                                        [contact.first_name, contact.last_name]
-                                            .filter(Boolean)
-                                            .join(" ") ||
-                                        contact.email ||
-                                        contact.phone ||
-                                        `Contact ${contact.id}`
-                                    }}
-                                    · {{ contact.contact_type }}
-                                </option>
-                            </select>
-                        </div>
-                    </div>
-
                     <div>
                         <label for="job-customer" class="fieldops-client-label"
-                            >Client</label
+                            >Customer</label
                         >
                         <div
                             v-if="jobCustomer"
@@ -4124,76 +4332,28 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                                 Change
                             </button>
                         </div>
-                        <p
-                            v-if="jobCustomer?.quickbooks_sync.status === 'pending'"
-                            role="status"
-                            aria-live="polite"
-                            class="mt-2 text-xs opacity-70"
-                        >
-                            Checking QuickBooks. Site and contact details will
-                            update here when the check finishes.
-                        </p>
-                        <p v-else-if="jobCustomer?.quickbooks_sync.status === 'sync_paused'" role="status" class="mt-2 text-xs text-amber-900">
-                            QuickBooks sync is paused by an Admin.
-                            <Link :href="route('admin.integrations.quickbooks.show')" class="font-semibold underline">Manage QuickBooks sync</Link>
-                        </p>
-                        <div v-if="jobCustomer?.contacts.length" class="mt-2">
-                            <label
-                                for="job-client-contact"
-                                class="fieldops-client-label"
-                                >Client contact</label
-                            >
-                            <select
-                                id="job-client-contact"
-                                v-model.number="selectedJobContactIndex"
-                                class="fieldops-client-input"
-                                @change="
-                                    selectJobContact(selectedJobContactIndex)
-                                "
-                            >
-                                <option
-                                    v-for="(
-                                        contact, index
-                                    ) in jobCustomer.contacts"
-                                    :key="`${contact.contact_type}-${index}`"
-                                    :value="index"
-                                >
-                                    {{
-                                        [contact.first_name, contact.last_name]
-                                            .filter(Boolean)
-                                            .join(" ") ||
-                                        contact.email ||
-                                        contact.phone ||
-                                        `Contact ${index + 1}`
-                                    }}
-                                    · {{ contact.contact_type }}
-                                </option>
-                            </select>
-                            <p class="mt-1 text-xs opacity-70">
-                                Selecting a contact fills the client contact
-                                name, phone, and email below.
-                            </p>
-                        </div>
                         <template v-if="!jobCustomer">
                             <div
                                 v-if="jobCustomerMode === 'search'"
-                                class="flex gap-2"
+                                class="flex items-stretch gap-2"
                             >
                                 <ClearableSearchInput
                                     id="job-customer"
                                     v-model="jobCustomerQuery"
-                                    class="fieldops-client-input"
-                                    placeholder="Search clients"
+                                    class="fieldops-client-input fieldops-entity-picker-input"
+                                    placeholder="Search customers"
                                     clear-label="Clear Customer search"
                                     :suggestion-types="['client']"
                                     :dispatch-selection="false"
+                                    show-search-icon
+                                    search-icon-label="Search customers"
                                     @select="selectJobCustomerSuggestion"
                                 />
                                 <button
                                     type="button"
-                                    aria-label="Add new client"
-                                    title="Add new client"
-                                    class="fieldops-client-add-button fieldops-add-action shrink-0"
+                                    aria-label="Add new Customer"
+                                    title="Add new Customer"
+                                    class="fieldops-entity-picker-add-button fieldops-add-action shrink-0"
                                     @click="startNewJobCustomer"
                                 >
                                     <PlusIcon class="h-5 w-5" />
@@ -4206,31 +4366,31 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                                 <input
                                     v-model="jobForm.customer_name"
                                     class="fieldops-client-input"
-                                    placeholder="New client name"
+                                    placeholder="New Customer name"
                                 />
                                 <input
                                     v-model="jobForm.customer_email"
                                     class="fieldops-client-input"
                                     type="email"
-                                    placeholder="Client email"
+                                    placeholder="Customer email"
                                 />
                                 <input
                                     v-model="jobForm.customer_phone"
                                     class="fieldops-client-input"
                                     type="tel"
-                                    placeholder="Client phone"
+                                    placeholder="Customer phone"
                                 />
                                 <input
                                     v-model="jobForm.customer_address"
                                     class="fieldops-client-input"
-                                    placeholder="Client address"
+                                    placeholder="Customer address"
                                 />
                                 <button
                                     type="button"
                                     class="text-left text-xs font-bold uppercase opacity-70"
                                     @click="jobCustomerMode = 'search'"
                                 >
-                                    Back to client search
+                                    Back to customer search
                                 </button>
                             </div>
                         </template>
@@ -4239,8 +4399,8 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                                 jobForm.errors.customer_id ||
                                 jobForm.errors.customer_name
                             "
-                            class="fieldops-client-error"
-                        >
+                                class="fieldops-client-error"
+                            >
                             {{
                                 jobForm.errors.customer_id ||
                                 jobForm.errors.customer_name
@@ -4249,53 +4409,64 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                     </div>
 
                     <div>
-                        <div class="mb-2 flex items-center justify-between">
-                            <label class="fieldops-client-label mb-0"
-                                >Site</label
-                            >
+                        <label id="job-site-label" class="fieldops-client-label">Site</label>
+                        <div v-if="!jobCustomer && jobCustomerMode === 'search'" class="flex items-stretch gap-2">
+                            <ClearableSearchInput
+                                id="job-site-search"
+                                v-model="jobSiteQuery"
+                                aria-labelledby="job-site-label"
+                                class="fieldops-client-input fieldops-entity-picker-input"
+                                placeholder="Search Sites"
+                                clear-label="Clear Site search"
+                                :suggestion-types="['site']"
+                                :dispatch-selection="false"
+                                show-search-icon
+                                search-icon-label="Search Sites"
+                                @select="selectJobSiteSuggestion"
+                            />
                             <button
                                 type="button"
-                                class="text-xs font-bold uppercase"
-                                @click="
-                                    jobSiteMode =
-                                        jobSiteMode === 'select'
-                                            ? 'create'
-                                            : 'select'
-                                "
+                                aria-label="Add new site"
+                                title="Add new site"
+                                class="fieldops-entity-picker-add-button fieldops-add-action shrink-0"
+                                disabled
+                                @click="startNewJobSite"
                             >
-                                {{
-                                    jobSiteMode === "select"
-                                        ? "New site"
-                                        : "Choose site"
-                                }}
+                                <PlusIcon class="h-5 w-5" />
                             </button>
                         </div>
-                        <select
-                            v-if="jobSiteMode === 'select'"
-                            v-model="jobForm.site_id"
-                            class="fieldops-client-input"
-                            :disabled="!jobCustomer"
-                        >
-                            <option :value="null">Select a site</option>
-                            <option
-                                v-for="site in jobCustomer?.sites || []"
-                                :key="site.id"
-                                :value="site.id"
+                        <div v-else-if="jobSiteMode === 'select'" class="flex items-stretch gap-2">
+                            <select
+                                id="job-site"
+                                v-model="jobForm.site_id"
+                                aria-labelledby="job-site-label"
+                                class="fieldops-client-input fieldops-entity-picker-input min-w-0 flex-1"
+                                :disabled="!jobCustomer"
                             >
-                                {{ site.name }}
-                            </option>
-                        </select>
-                        <div v-else class="grid gap-2 sm:grid-cols-2">
-                            <input
-                                v-model="jobForm.site_name"
-                                class="fieldops-client-input"
-                                placeholder="New site name"
-                            />
-                            <input
-                                v-model="jobForm.site_address"
-                                class="fieldops-client-input"
-                                placeholder="Site address"
-                            />
+                                <option :value="null">Select a site</option>
+                                <option v-for="site in jobCustomer?.sites || []" :key="site.id" :value="site.id">
+                                    {{ site.name }}
+                                </option>
+                            </select>
+                            <button
+                                type="button"
+                                aria-label="Add new site"
+                                title="Add new site"
+                                class="fieldops-entity-picker-add-button fieldops-add-action shrink-0"
+                                :disabled="!jobCustomer && jobCustomerMode !== 'create'"
+                                @click="startNewJobSite"
+                            >
+                                <PlusIcon class="h-5 w-5" />
+                            </button>
+                        </div>
+                        <div v-else class="grid gap-2 sm:grid-cols-[1fr_auto]">
+                            <div class="grid gap-2 sm:grid-cols-2">
+                                <input v-model="jobForm.site_name" aria-label="New site name" class="fieldops-client-input" placeholder="New site name" />
+                                <input v-model="jobForm.site_address" aria-label="Site address" class="fieldops-client-input" placeholder="Site address" />
+                            </div>
+                            <button type="button" class="fieldops-secondary-action shrink-0" @click="chooseExistingJobSite">
+                                Choose site
+                            </button>
                         </div>
                         <p
                             v-if="
@@ -4311,19 +4482,110 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                         </p>
                     </div>
 
-                    <div>
-                        <label
-                            for="job-description"
-                            class="fieldops-client-label"
-                            >Description</label
-                        >
-                        <textarea
-                            id="job-description"
-                            v-model="jobForm.description"
-                            rows="2"
-                            class="fieldops-client-input"
-                        ></textarea>
-                    </div>
+                    <p
+                        v-if="jobCustomer?.quickbooks_sync.status === 'pending'"
+                        role="status"
+                        aria-live="polite"
+                        class="-mt-2 text-xs opacity-70"
+                    >
+                        Checking QuickBooks. Site and contact details will update when the check finishes.
+                    </p>
+                    <p v-else-if="jobCustomer?.quickbooks_sync.status === 'sync_paused'" role="status" class="-mt-2 text-xs text-amber-900">
+                        QuickBooks sync is paused by an Admin.
+                        <Link :href="route('admin.integrations.quickbooks.show')" class="font-semibold underline">Manage QuickBooks sync</Link>
+                    </p>
+
+                    <section class="grid gap-3" aria-labelledby="job-contacts-heading">
+                        <h3 id="job-contacts-heading" class="fieldops-client-label mb-0">Contacts</h3>
+                        <div class="grid gap-3 sm:grid-cols-2">
+                            <div
+                                v-for="role in [
+                                    {
+                                        label: 'Customer contact',
+                                        key: 'client_contact',
+                                        value: jobForm.client_contact_id,
+                                        name: jobForm.client_contact_name,
+                                        phone: jobForm.client_contact_phone,
+                                        email: jobForm.client_contact_email,
+                                    },
+                                    {
+                                        label: 'Technical contact',
+                                        key: 'technical_contact',
+                                        value: jobForm.technical_contact_id,
+                                        name: jobForm.technical_contact_name,
+                                        phone: jobForm.technical_contact_phone,
+                                        email: jobForm.technical_contact_email,
+                                    },
+                                    {
+                                        label: 'Project manager',
+                                        key: 'project_manager',
+                                        value: jobForm.project_manager_contact_id,
+                                        name: jobForm.project_manager_name,
+                                        phone: jobForm.project_manager_phone,
+                                        email: jobForm.project_manager_email,
+                                    },
+                                    {
+                                        label: 'Contractor check-in contact',
+                                        key: 'contractor_check_in',
+                                        value: jobForm.contractor_check_in_contact_id,
+                                        name: jobForm.contractor_check_in_name,
+                                        phone: jobForm.contractor_check_in_phone,
+                                        email: jobForm.contractor_check_in_email,
+                                    },
+                                ]"
+                                :key="role.key"
+                                class="grid gap-2 rounded-xl bg-white/35 p-3"
+                            >
+                                <label :for="`${role.key}-contact-picker`" class="fieldops-client-label mb-0">
+                                    {{ role.label }}
+                                </label>
+                                <select
+                                    :id="`${role.key}-contact-picker`"
+                                    :value="role.value ?? ''"
+                                    class="fieldops-client-input"
+                                    :disabled="!jobCustomer?.contacts.length"
+                                    @change="handleJobContactRoleChange(role.key as JobContactRole, $event)"
+                                >
+                                    <option value="">No contact selected</option>
+                                    <option v-for="contact in jobCustomer?.contacts || []" :key="contact.id" :value="contact.id">
+                                        {{ [contact.first_name, contact.last_name].filter(Boolean).join(" ") || contact.email || contact.phone || `Contact ${contact.id}` }}
+                                        · {{ contact.contact_type }}
+                                    </option>
+                                </select>
+                                <div class="grid gap-2">
+                                    <input
+                                        :aria-label="`${role.label} name`"
+                                        :value="role.name"
+                                        class="fieldops-client-input"
+                                        :readonly="role.value !== null"
+                                        placeholder="Name"
+                                        @input="updateJobContact(role.key, 'name', $event)"
+                                    />
+                                    <input
+                                        :aria-label="`${role.label} phone`"
+                                        :value="role.phone"
+                                        type="tel"
+                                        class="fieldops-client-input"
+                                        :readonly="role.value !== null"
+                                        placeholder="Phone"
+                                        @input="updateJobContact(role.key, 'phone', $event)"
+                                    />
+                                    <input
+                                        :aria-label="`${role.label} email`"
+                                        :value="role.email"
+                                        type="email"
+                                        class="fieldops-client-input"
+                                        :readonly="role.value !== null"
+                                        placeholder="Email"
+                                        @input="updateJobContact(role.key, 'email', $event)"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        <p v-if="jobForm.errors.client_contact_email || jobForm.errors.technical_contact_email || jobForm.errors.project_manager_email || jobForm.errors.contractor_check_in_email" class="fieldops-client-error">
+                            {{ jobForm.errors.client_contact_email || jobForm.errors.technical_contact_email || jobForm.errors.project_manager_email || jobForm.errors.contractor_check_in_email }}
+                        </p>
+                    </section>
                     <div>
                         <label for="job-scope" class="fieldops-client-label">
                             Job Scope (required)
@@ -4341,7 +4603,7 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                     </div>
                     <div v-if="isClientCompletionSummaryRequired(jobForm.status)">
                         <label for="job-client-completion-summary" class="fieldops-client-label">
-                            Client-facing completion summary (required)
+                            Customer-facing completion summary (required)
                         </label>
                         <textarea
                             id="job-client-completion-summary"
@@ -4383,26 +4645,6 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                             rows="3"
                             class="fieldops-client-input"
                         ></textarea>
-                    </div>
-                    <div>
-                        <label for="job-status" class="fieldops-client-label"
-                            >Status</label
-                        >
-                        <select
-                            id="job-status"
-                            v-model="jobForm.status"
-                            class="fieldops-client-input"
-                        >
-                            <option v-for="status in calendarSelectableWorkOrderStatuses" :key="status.value" :value="status.value">
-                                {{ status.label }}
-                            </option>
-                        </select>
-                        <p v-if="timerStartConflictError(jobForm.errors)" class="fieldops-client-error">
-                            {{ timerStartConflictError(jobForm.errors) }}
-                        </p>
-                        <p v-if="jobForm.errors.timer_visit_id" class="fieldops-client-error">
-                            {{ jobForm.errors.timer_visit_id }}
-                        </p>
                     </div>
                     <div v-if="isPendingReasonRequired(jobForm.status) && selectedWorkOrder?.status !== jobForm.status">
                         <label for="job-pending-reason" class="fieldops-client-label">Reason for Pending (required)</label>
@@ -4562,21 +4804,21 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
                         >
                             <button
                                 type="button"
-                                @click="openClientForm"
+                                @click="router.visit(route('admin.customers', { create_client: 1 }))"
                                 class="fieldops-fab-menu-item fieldops-add-action rounded-lg px-4 py-2 text-left text-sm font-bold uppercase tracking-wide transition-colors"
                             >
-                                Add Client
+                                Add Customer
                             </button>
                             <button
                                 type="button"
-                                @click="$emit('action', 'add_project')"
+                                @click="openAddProjectForSelectedDate"
                                 class="fieldops-fab-menu-item fieldops-add-action rounded-lg px-4 py-2 text-left text-sm font-bold uppercase tracking-wide transition-colors"
                             >
                                 Add Project
                             </button>
                             <button
                                 type="button"
-                                @click="openJobForm"
+                                @click="openAddJobForSelectedDate"
                                 class="fieldops-fab-menu-item fieldops-add-action rounded-lg px-4 py-2 text-left text-sm font-bold uppercase tracking-wide transition-colors"
                             >
                                 Add Job
@@ -5649,36 +5891,13 @@ const { handleTouchStart, handleTouchEnd } = useSwipeNavigation({
     opacity: 1;
 }
 
-.fieldops-client-add-button {
-    display: inline-flex;
-    height: 46px;
-    width: 46px;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--fieldops-blue-dark);
-    border-radius: 8px;
-    background: var(--fieldops-blue-dark);
-    color: white;
-    transition:
-        background-color 150ms ease,
-        transform 150ms ease;
-}
-
-.fieldops-client-add-button:hover {
-    background: var(--fieldops-navy);
-    transform: translateY(-1px);
-}
-
-.fieldops-client-add-button.fieldops-add-action:not(:disabled) {
-    border-color: var(--fieldops-success-light);
-    background: var(--fieldops-success-light);
-    color: var(--fieldops-success-dark);
-}
-
-.fieldops-client-add-button.fieldops-add-action:not(:disabled):hover {
-    border-color: var(--fieldops-success);
-    background: var(--fieldops-success);
-    color: var(--fieldops-white);
+.fieldops-job-status-select {
+    width: min(9rem, 38vw);
+    min-width: 7rem;
+    min-height: 2.75rem;
+    padding: 0.35rem 1.65rem 0.35rem 0.6rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
 }
 
 .fieldops-client-error {

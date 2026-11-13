@@ -20,6 +20,7 @@ class ResetLocalBusinessDataForQuickBooksImportTest
     /** @var list<string> */
     private const BUSINESS_TABLES = [
         'visit_user',
+        'timeline_events',
         'job_items',
         'quickbooks_item_catalog_syncs',
         'work_order_user',
@@ -54,18 +55,15 @@ class ResetLocalBusinessDataForQuickBooksImportTest
         'sharepoint_attachments',
     ];
 
-    public function __construct(private readonly QuickBooksApiClient $quickBooks) {}
-
     /** @return array{environment: string, database: string, quickbooksEnvironment: string, adminAccountsPreserved: int, usersPreserved: int, integrationConnectionsPreserved: int, tables: array<string, int>} */
-    public function preview(string $mode = ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API): array
+    public function preview(): array
     {
-        [$admin, $counts] = $this->assertSafeTarget($mode);
+        [$admin, $counts] = $this->assertSafeTarget();
 
         return [
             'environment' => app()->environment(),
             'database' => (string) config('database.connections.pgsql.database'),
             'quickbooksEnvironment' => (string) config('services.quickbooks.environment'),
-            'importMode' => $mode,
             'adminAccountsPreserved' => 1,
             'usersPreserved' => User::query()->count(),
             'integrationConnectionsPreserved' => DB::table('integration_connections')->count(),
@@ -74,11 +72,11 @@ class ResetLocalBusinessDataForQuickBooksImportTest
     }
 
     /** @return array{deleted: array<string, int>, adminUserId: int} */
-    public function reset(string $mode = ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API): array
+    public function reset(): array
     {
-        return DB::transaction(function () use ($mode): array {
+        return DB::transaction(function (): array {
             ApplicationSetupState::query()->whereKey(1)->lockForUpdate()->firstOrFail();
-            [$admin, $counts] = $this->assertSafeTarget($mode);
+            [$admin, $counts] = $this->assertSafeTarget();
 
             foreach (self::BUSINESS_TABLES as $table) {
                 if (Schema::hasTable($table)) {
@@ -91,6 +89,11 @@ class ResetLocalBusinessDataForQuickBooksImportTest
                 QuickBooksInitialCustomerImport::query()->delete();
             }
 
+            if (Schema::hasTable('fieldpulse_import_failures')) {
+                DB::table('fieldpulse_import_failures')->delete();
+                DB::table('fieldpulse_import_runs')->delete();
+            }
+
             InstallationClaim::query()->whereKey(1)->update([
                 'claimed_at' => InstallationClaim::query()->whereKey(1)->value('claimed_at') ?? now(),
                 'claimed_by_user_id' => $admin->getKey(),
@@ -100,10 +103,9 @@ class ResetLocalBusinessDataForQuickBooksImportTest
             $now = now();
             ApplicationSetupState::query()->whereKey(1)->update([
                 'onboarding_required' => true,
-                'quickbooks_import_mode' => $mode,
-                'quickbooks_sync_opted_in' => $mode === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API,
-                'quickbooks_sync_opted_in_at' => $mode === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API ? $now : null,
-                'quickbooks_sync_verification_required' => $mode === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API,
+                'quickbooks_sync_opted_in' => false,
+                'quickbooks_sync_opted_in_at' => null,
+                'quickbooks_sync_verification_required' => false,
                 'quickbooks_sync_enabled' => false,
                 'readiness_completed_at' => null,
                 'readiness_completed_by_user_id' => null,
@@ -114,9 +116,7 @@ class ResetLocalBusinessDataForQuickBooksImportTest
             $steps = [
                 ApplicationSetupStep::FIRST_ADMIN => ApplicationSetupStep::STATUS_PASSED,
                 ApplicationSetupStep::BWS_RUNTIME_READER => ApplicationSetupStep::STATUS_PASSED,
-                ApplicationSetupStep::QUICKBOOKS_OAUTH => $mode === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV
-                    ? ApplicationSetupStep::STATUS_NOT_REQUIRED
-                    : ApplicationSetupStep::STATUS_PASSED,
+                ApplicationSetupStep::QUICKBOOKS_OAUTH => ApplicationSetupStep::STATUS_NOT_REQUIRED,
                 ApplicationSetupStep::INITIAL_QBO_IMPORT => ApplicationSetupStep::STATUS_PENDING,
                 ApplicationSetupStep::GRAPH_VALIDATION => ApplicationSetupStep::STATUS_PENDING,
                 ApplicationSetupStep::FAILURE_RECONCILIATION => ApplicationSetupStep::STATUS_PENDING,
@@ -144,34 +144,17 @@ class ResetLocalBusinessDataForQuickBooksImportTest
     }
 
     /** @return array{0: User, 1: array<string, int>} */
-    private function assertSafeTarget(string $mode): array
+    private function assertSafeTarget(): array
     {
-        if (! in_array($mode, [
-            ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API,
-            ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV,
-        ], true)) {
-            throw new RuntimeException('Choose QuickBooks API or CSV import mode.');
-        }
-
         if (! app()->environment('local') || config('database.default') !== 'pgsql') {
             throw new RuntimeException('This reset is restricted to the local PostgreSQL environment.');
-        }
-
-        if ($mode === ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API) {
-            if (config('services.quickbooks.environment') !== 'sandbox') {
-                throw new RuntimeException('QuickBooks API reset mode requires sandbox configuration.');
-            }
-
-            if (! $this->quickBooks->isConnectedForCurrentEnvironment()) {
-                throw new RuntimeException('A usable QuickBooks sandbox connection is required.');
-            }
         }
 
         $bws = BitwardenSecretManagerConnection::query()
             ->where('environment', app()->environment())
             ->first();
 
-        if (! ($bws?->isVerifiedForImportMode($mode) ?? false)) {
+        if (! ($bws?->isVerifiedForCurrentEnvironment() ?? false)) {
             throw new RuntimeException('A verified BWS runtime connection is required.');
         }
 

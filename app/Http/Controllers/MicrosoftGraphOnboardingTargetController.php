@@ -217,6 +217,9 @@ class MicrosoftGraphOnboardingTargetController extends Controller
                 'non_target_mailbox_email' => $target->non_target_mailbox_email,
                 'non_target_is_user_mailbox' => $target->non_target_is_user_mailbox,
                 'runtimeActivatedAt' => $target->runtime_activated_at?->toIso8601String(),
+                'businessAttachmentsWritesActivatedAt' => $target->business_attachments_writes_activated_at?->toIso8601String(),
+                'businessAttachmentsWritesEnabled' => $target->business_attachments_writes_activated_at !== null
+                    && (bool) config('services.microsoft_graph.sharepoint_enabled'),
                 'non_target_site_id' => $target->non_target_site_id,
                 'non_target_drive_id' => $target->non_target_drive_id,
                 'configuredAt' => $target->configured_at?->toIso8601String(),

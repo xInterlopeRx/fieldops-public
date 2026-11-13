@@ -30,29 +30,29 @@ const props = defineProps<{
 const inviteForm = useForm({
     name: "",
     email: "",
-    accountRole: "basic_user",
     management: false,
     billing: false,
     roles: [] as string[],
 });
-const page = usePage<PageProps<{ flash?: { invitation_url?: string } }>>();
+const page = usePage<PageProps<{ flash?: { invitation_url?: string; success?: string } }>>();
 const roleSelections = reactive<
-    Record<number, { accountRole: string; management: boolean; billing: boolean }>
+    Record<number, { management: boolean; billing: boolean; finance: boolean; hr: boolean }>
 >(
     Object.fromEntries(
         props.users.map((user) => [
             user.id,
             {
-                accountRole: user.roles.includes("admin") ? "admin" : "basic_user",
                 management: user.roles.includes("management"),
                 billing: user.roles.includes("billing"),
+                finance: user.roles.includes("finance"),
+                hr: user.roles.includes("hr"),
             },
         ]),
     ),
 );
 
 const invite = () => {
-    const roles = [inviteForm.accountRole];
+    const roles = ["basic_user"];
     if (inviteForm.management) roles.push("management");
     if (inviteForm.billing) roles.push("billing");
     inviteForm.roles = roles;
@@ -69,13 +69,18 @@ const invite = () => {
 
 const updateRoles = (userId: number) => {
     const selection = roleSelections[userId];
-    const roles = [selection.accountRole];
-    if (selection.management) roles.push("management");
-    if (selection.billing) roles.push("billing");
+    const securityGroups = [
+        ...(selection.finance ? ["finance"] : []),
+        ...(selection.hr ? ["hr"] : []),
+    ];
+    const notificationRoles = [
+        ...(selection.management ? ["management"] : []),
+        ...(selection.billing ? ["billing"] : []),
+    ];
 
     router.patch(
         route("admin.users.roles.update", userId),
-        { roles },
+        { security_groups: securityGroups, notification_roles: notificationRoles },
         { preserveScroll: true },
     );
 };
@@ -85,6 +90,8 @@ const roleLabels: Record<string, string> = {
     basic_user: "Basic User",
     management: "Management",
     billing: "Billing",
+    finance: "Finance",
+    hr: "HR",
 };
 const label = (role: string) => roleLabels[role] ?? role;
 </script>
@@ -93,10 +100,13 @@ const label = (role: string) => roleLabels[role] ?? role;
     <Head title="User management" />
     <AdminLayout title="User management">
         <div class="mx-auto max-w-7xl space-y-6 px-4 py-8 sm:px-6 lg:px-8">
+            <p v-if="page.props.flash?.success" role="status" class="rounded-lg border border-green-300 bg-green-50 p-3 text-sm text-green-900">
+                {{ page.props.flash.success }}
+            </p>
             <section class="fieldops-panel bg-white p-6">
                 <h1 class="text-lg font-semibold">Invite a user</h1>
                 <p class="mt-1 text-sm text-gray-600">
-                    Choose one account role. Management and Billing add notification routing only.
+                    New users start as Basic User. Admin is transferred separately after a new account is active. Security groups are assigned from each user's Staff profile; Management and Billing are notification roles only.
                 </p>
                 <div
                     v-if="onboarding.required && !onboarding.invitationsUnlocked"
@@ -126,13 +136,7 @@ const label = (role: string) => roleLabels[role] ?? role;
                         placeholder="Email"
                         required
                     />
-                    <label class="grid gap-1 text-sm">
-                        <span>Account role</span>
-                        <select v-model="inviteForm.accountRole" class="fieldops-client-input">
-                            <option value="basic_user">Basic User</option>
-                            <option value="admin">Admin</option>
-                        </select>
-                    </label>
+                    <p class="self-center text-sm text-gray-600">Account role: Basic User</p>
                     <fieldset class="flex flex-wrap items-center gap-4 text-sm">
                         <legend class="sr-only">Notification roles</legend>
                         <label class="flex items-center gap-2">
@@ -178,33 +182,39 @@ const label = (role: string) => roleLabels[role] ?? role;
                                 {{ user.status }}
                             </div>
                         </div>
-                        <form class="grid gap-2 sm:grid-cols-[12rem_auto]" @submit.prevent="updateRoles(user.id)">
-                            <div class="grid gap-2">
-                                <label class="grid gap-1 text-xs">
-                                    <span>Account role</span>
-                                    <select
-                                        v-model="roleSelections[user.id].accountRole"
-                                        class="fieldops-client-input"
-                                        :disabled="user.id === currentUserId"
-                                        :aria-label="`Account role for ${user.name}`"
-                                    >
-                                        <option value="basic_user">Basic User</option>
-                                        <option value="admin">Admin</option>
-                                    </select>
+                        <div class="grid gap-2 sm:min-w-72">
+                            <p class="text-xs text-gray-600">
+                                Account: {{ user.roles.includes("admin") ? "Admin" : "Basic User" }}
+                                <span v-if="user.roles.includes('admin')"> · transferred separately</span>
+                            </p>
+                            <fieldset class="grid gap-1 text-xs">
+                                <legend class="font-semibold text-gray-700">Security groups</legend>
+                                <label class="flex items-center gap-2">
+                                    <input v-model="roleSelections[user.id].finance" type="checkbox" />
+                                    Finance
                                 </label>
-                                <label class="flex items-center gap-2 text-xs">
+                                <label class="flex items-center gap-2">
+                                    <input v-model="roleSelections[user.id].hr" type="checkbox" />
+                                    HR
+                                </label>
+                            </fieldset>
+                            <fieldset class="grid gap-1 text-xs">
+                                <legend class="font-semibold text-gray-700">Notification roles</legend>
+                                <label class="flex items-center gap-2">
                                     <input v-model="roleSelections[user.id].management" type="checkbox" />
                                     Management notifications
                                 </label>
-                                <label class="flex items-center gap-2 text-xs">
+                                <label class="flex items-center gap-2">
                                     <input v-model="roleSelections[user.id].billing" type="checkbox" />
                                     Billing notifications
                                 </label>
+                            </fieldset>
+                            <div class="flex flex-wrap gap-2">
+                                <button class="fieldops-secondary-action min-h-9 px-3" type="button" @click="updateRoles(user.id)">
+                                    Save profile roles
+                                </button>
                             </div>
-                            <button class="fieldops-submit-action self-start" type="submit">
-                                Save roles
-                            </button>
-                        </form>
+                        </div>
                     </div>
                 </div>
             </section>

@@ -10,6 +10,7 @@ use App\Models\SharePointAttachment;
 use App\Models\Site;
 use App\Models\User;
 use App\Models\WorkOrder;
+use App\Services\Contracts\SharePointAttachmentUploader;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -17,16 +18,23 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
-class SharePointAttachmentUploadService
+class SharePointAttachmentUploadService implements SharePointAttachmentUploader
 {
     public function __construct(
         private readonly MicrosoftGraphSharePointStorageService $storage,
         private readonly AttachmentLifecycleService $lifecycle,
+        private readonly SharePointAttachmentTargetResolver $targets,
     ) {}
 
     public function uploadForCustomer(UploadedFile $file, Customer $customer, User $uploadedBy): SharePointAttachment
     {
-        return $this->store($file, $customer, (int) $customer->getKey(), $uploadedBy);
+        return $this->store(
+            $file,
+            $customer,
+            (int) $customer->getKey(),
+            $uploadedBy,
+            $this->uploadTarget(),
+        );
     }
 
     public function uploadForProject(UploadedFile $file, Project $project, User $uploadedBy): SharePointAttachment
@@ -36,6 +44,7 @@ class SharePointAttachmentUploadService
             $project,
             (int) $project->customer_id,
             $uploadedBy,
+            $this->uploadTarget(),
             projectId: (int) $project->getKey(),
         );
     }
@@ -47,6 +56,7 @@ class SharePointAttachmentUploadService
         ?string $clientUploadId = null,
     ): SharePointAttachment {
         $site = Site::query()->findOrFail($workOrder->site_id);
+        $target = $this->uploadTarget();
 
         if ($clientUploadId !== null) {
             if (! Str::isUuid($clientUploadId)) {
@@ -63,16 +73,25 @@ class SharePointAttachmentUploadService
                 $existing = SharePointAttachment::query()->where('client_upload_id', $clientUploadId)->first();
 
                 if ($existing !== null) {
+                    $legacyWorkSchedulesSite = $target['target'] === SharePointAttachment::TARGET_WORK_SCHEDULES
+                        && $existing->sharepoint_site_id === null;
                     $sameUpload = (int) $existing->company_id === (int) $site->customer_id
                         && (int) $existing->site_id === (int) $site->getKey()
                         && (int) $existing->job_id === (int) $workOrder->getKey()
                         && (int) $existing->uploaded_by === (int) $uploadedBy->getKey()
+                        && ($existing->sharepoint_site_id === $target['site_id'] || $legacyWorkSchedulesSite)
+                        && $existing->sharepoint_drive_id === $target['drive_id']
+                        && $existing->sharepoint_target === $target['target']
                         && $existing->filename === $this->safeClientFilename($file)
                         && (int) $existing->file_size === (int) $file->getSize()
                         && strtolower($existing->mime_type) === strtolower($file->getMimeType() ?: 'application/octet-stream');
 
                     if (! $sameUpload) {
                         throw new AttachmentUploadFailed(409, new MicrosoftGraphApiException('graph_sharepoint_attachment_upload_id_conflict', 409));
+                    }
+
+                    if ($legacyWorkSchedulesSite) {
+                        $existing->forceFill(['sharepoint_site_id' => $target['site_id']])->save();
                     }
 
                     return $existing;
@@ -83,6 +102,7 @@ class SharePointAttachmentUploadService
                     $workOrder,
                     (int) $site->customer_id,
                     $uploadedBy,
+                    $target,
                     siteId: (int) $site->getKey(),
                     projectId: $workOrder->project_id === null ? null : (int) $workOrder->project_id,
                     jobId: (int) $workOrder->getKey(),
@@ -98,6 +118,7 @@ class SharePointAttachmentUploadService
             $workOrder,
             (int) $site->customer_id,
             $uploadedBy,
+            $target,
             siteId: (int) $site->getKey(),
             projectId: $workOrder->project_id === null ? null : (int) $workOrder->project_id,
             jobId: (int) $workOrder->getKey(),
@@ -143,13 +164,14 @@ class SharePointAttachmentUploadService
         Customer|Project|WorkOrder $owner,
         int $companyId,
         User $uploadedBy,
+        array $target,
         ?int $siteId = null,
         ?int $projectId = null,
         ?int $jobId = null,
         ?string $clientUploadId = null,
     ): SharePointAttachment {
         try {
-            return $this->persist($file, $owner, $companyId, $uploadedBy, $siteId, $projectId, $jobId, $clientUploadId);
+            return $this->persist($file, $owner, $companyId, $uploadedBy, $target, $siteId, $projectId, $jobId, $clientUploadId);
         } catch (MicrosoftGraphApiException $exception) {
             Log::warning('SharePoint-backed attachment upload failed', [
                 'error_code' => $exception->reason,
@@ -165,6 +187,7 @@ class SharePointAttachmentUploadService
         Customer|Project|WorkOrder $owner,
         int $companyId,
         User $uploadedBy,
+        array $target,
         ?int $siteId = null,
         ?int $projectId = null,
         ?int $jobId = null,
@@ -191,19 +214,25 @@ class SharePointAttachmentUploadService
             ? strtolower($extension)
             : 'bin';
         $relativePath = 'FieldOps/customer-'.$companyId.'/'.($clientUploadId ?? Str::uuid()).'.'.$safeExtension;
-        $driveId = config('services.microsoft_graph.work_schedules.drive_id');
+        $siteTargetId = $target['site_id'] ?? null;
+        $driveId = $target['drive_id'] ?? null;
+        $targetKey = $target['target'] ?? null;
 
-        if (! is_string($driveId) || trim($driveId) === '') {
+        if (
+            ! is_string($siteTargetId) || trim($siteTargetId) === '' ||
+            ! is_string($driveId) || trim($driveId) === '' ||
+            ! in_array($targetKey, [SharePointAttachment::TARGET_WORK_SCHEDULES, SharePointAttachment::TARGET_BUSINESS_ATTACHMENTS], true)
+        ) {
             throw new MicrosoftGraphApiException('graph_sharepoint_storage_configuration_incomplete', 503);
         }
 
-        $uploaded = $this->storage->upload($relativePath, $contents, $mimeType);
+        $uploaded = $this->storage->uploadToTarget($siteTargetId, $driveId, $relativePath, $contents, $mimeType);
         $itemId = $uploaded['id'] ?? null;
 
         try {
             if (
                 ! is_string($itemId) || $itemId === '' || strlen($itemId) > 255 ||
-                ! is_int($uploaded['size'] ?? null) || $uploaded['size'] !== $fileSize ||
+                ! is_int($uploaded['size'] ?? null) ||
                 ! $this->isSharePointUrl($uploaded['sharepoint_url'] ?? null)
             ) {
                 throw new MicrosoftGraphApiException('graph_sharepoint_attachment_metadata_invalid', 502);
@@ -222,6 +251,8 @@ class SharePointAttachmentUploadService
                 $filename,
                 $mimeType,
                 $fileSize,
+                $siteTargetId,
+                $targetKey,
                 $driveId,
                 $itemId,
                 $uploaded,
@@ -252,6 +283,8 @@ class SharePointAttachmentUploadService
                     'filename' => $filename,
                     'mime_type' => $mimeType,
                     'file_size' => $fileSize,
+                    'sharepoint_site_id' => trim($siteTargetId),
+                    'sharepoint_target' => $targetKey,
                     'sharepoint_drive_id' => trim($driveId),
                     'sharepoint_item_id' => $itemId,
                     'sharepoint_url' => $uploaded['sharepoint_url'],
@@ -265,7 +298,7 @@ class SharePointAttachmentUploadService
         } catch (Throwable $exception) {
             if (! $remoteFileWasAlreadyRegistered && is_string($itemId) && $itemId !== '') {
                 try {
-                    $this->storage->delete($itemId);
+                    $this->storage->delete($itemId, $driveId, $siteTargetId);
                 } catch (Throwable) {
                     Log::warning('SharePoint uploaded attachment could not be removed after metadata failure', [
                         'drive_id' => trim($driveId),
@@ -305,10 +338,24 @@ class SharePointAttachmentUploadService
         return $filename === '' ? 'attachment' : $filename;
     }
 
+    /** @return array{site_id: string, drive_id: string, target: string} */
+    private function uploadTarget(): array
+    {
+        try {
+            return $this->targets->forNewAttachment();
+        } catch (MicrosoftGraphApiException $exception) {
+            throw new AttachmentUploadFailed($exception->httpStatus, $exception);
+        }
+    }
+
     private function compensate(SharePointAttachment $attachment): void
     {
         try {
-            $this->storage->delete($attachment->sharepoint_item_id);
+            $this->storage->delete(
+                $attachment->sharepoint_item_id,
+                $attachment->sharepoint_drive_id,
+                $attachment->sharepoint_site_id,
+            );
         } catch (Throwable) {
             Log::warning('SharePoint attachment could not be removed after a batch upload failure', [
                 'drive_id' => $attachment->sharepoint_drive_id,

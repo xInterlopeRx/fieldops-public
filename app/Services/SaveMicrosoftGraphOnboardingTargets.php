@@ -60,6 +60,8 @@ class SaveMicrosoftGraphOnboardingTargets
             $target->contacts_boundary_error_code = null;
             $target->runtime_activated_at = null;
             $target->runtime_activated_by_user_id = null;
+            $target->business_attachments_writes_activated_at = null;
+            $target->business_attachments_writes_activated_by_user_id = null;
             $target->save();
 
             GraphOnboardingChallenge::query()

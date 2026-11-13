@@ -16,7 +16,7 @@ FROM scratch AS bws-helper-export
 COPY --from=bws-helper-builder /build/target/release/fieldops-bws-helper /fieldops-bws-helper
 
 # Shared PHP runtime extensions. PHP 8.5 FPM supplies Zend OPcache.
-FROM php:8.5-fpm-alpine@sha256:fa01fb1645cd0fc566a5f146b099adace33b906571f972f71f2182a7c12d1cd7 AS php-extensions
+FROM php:8.5-fpm-alpine@sha256:4c2818074ec49f6abe46620f3965e0cb75bc3a5f2b417edd1aacaba6f091c40e AS php-extensions
 
 RUN apk add --no-cache ca-certificates freetype icu-libs libjpeg-turbo libpng libwebp libzip libpq oniguruma sqlite-libs libstdc++ \
     && apk add --no-cache --virtual .build-deps $PHPIZE_DEPS freetype-dev icu-dev libjpeg-turbo-dev libpng-dev libwebp-dev libzip-dev oniguruma-dev postgresql-dev sqlite-dev \
@@ -41,7 +41,7 @@ FROM composer:2.8@sha256:5248900ab8b5f7f880c2d62180e40960cd87f60149ec9a1abfd62ac
 WORKDIR /var/www/html
 COPY . .
 ENV APP_ENV=production APP_DEBUG=false COMPOSER_ALLOW_SUPERUSER=1
-RUN composer install --no-dev --no-interaction --no-progress --prefer-dist --classmap-authoritative
+RUN composer install --no-dev --no-interaction --no-progress --prefer-dist --classmap-authoritative --ignore-platform-req=ext-gd --ignore-platform-req=ext-zip
 
 # Build Vue/TypeScript and Vite assets from the locked npm dependency graph.
 FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS frontend-build

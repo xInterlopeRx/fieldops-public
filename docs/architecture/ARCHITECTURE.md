@@ -49,18 +49,24 @@ email, and public bootstrap closes permanently once claimed. After integration
 onboarding is ready, all further accounts are provisioned through Admin
 invitations. Email domain and Microsoft tenant do not restrict staff sign-in.
 `spatie/laravel-permission` stores staff roles and permissions, with its teams
-feature disabled. `admin` and `basic_user` retain the existing account/access
-distinction and the same initial business permissions. `management` and
-`billing` are additive notification-recipient roles only; user management
-assigns one account role plus optional notification roles. Customer login,
-multi-tenant provisioning, and fine-grained business-record permissions remain
-deferred.
+feature disabled. `admin` and `basic_user` are account roles; additive `finance`
+and `hr` roles are service security groups. Users may hold multiple groups, and
+the Staff directory is the normal group-assignment surface. The initial Admin
+claim receives all groups. The single active Admin account role can be granted
+after bootstrap only through a recipient-accepted transfer, not by invitation or
+ordinary role editing. `management` and `billing` remain additive
+notification-recipient roles only. Customer login, multi-tenant provisioning,
+and fine-grained business-record permissions remain deferred.
 
-The initial permission grants are explicit: Admin has `admin.access`,
-`users.manage`, `integrations.manage`, and the same `work_orders.view/manage`
-permissions as Basic User. Management has `notifications.management`; Billing
-has `notifications.billing`. Notification roles do not grant admin or business
-record access on their own.
+Admin and Basic User have `work_orders.view/manage`. Admin has `admin.access`,
+`integrations.manage`, and read-only Logs access; `users.manage` belongs to HR,
+not the Admin account role by itself. Finance has Admin workspace access and
+financial Time Tracking/billing capabilities but not Staff management. HR has
+Staff management, full Time Tracking, and review/correction capabilities.
+Unassigned staff can view their own and shared-assignment time entries without
+billing/compensation fields or write actions. Management has
+`notifications.management`; Billing has `notifications.billing`. Notification
+roles do not grant application access.
 
 Laravel Fortify provides required TOTP two-factor authentication and recovery
 codes behind the existing Vue/Inertia interface. Enrollment and changes require
@@ -146,14 +152,32 @@ activation enabled no write flags and made no Graph calls.
 
 ## SMTP mail configuration
 
-First-run staff email verification uses the SMTP transport configured and
-test-sent to the proposed first Admin during the empty-install bootstrap, before
-the installation claim is consumed. SMTP username/password are encrypted in the
-singleton `mail_transport_configurations` row with the deployment-managed
-`APP_KEY`; the settings are applied to web requests and queue workers without
-writing plaintext credentials to environment files or logs. Plain SMTP is
-allowed only in local development. This is separate from the Microsoft Graph
-outbox used for approved operational mail.
+First-run staff email verification uses SMTP settings explicitly tested to the
+proposed first Admin during the empty-install bootstrap, before the installation
+claim is consumed. A successful test stores the settings in a pending singleton
+`mail_transport_configurations` row; claiming the first Admin activates that
+same configuration without sending a duplicate test message. Reusing the saved
+credentials for a different recipient requires another successful test to that
+recipient. If a later re-test of the saved settings fails, the row keeps the
+settings and encrypted credentials but loses its verified marker
+(`tested_at` becomes null), so the green "test succeeded" state is not shown
+alongside the failure and first-Admin creation is blocked until a test succeeds
+again. SMTP username/password are encrypted in the database with the
+deployment-managed `APP_KEY`, excluded from session old input, and never returned
+to the browser. SMTP TLS verifies both the server certificate chain and hostname
+in the application; trust-chain failures fail closed. A successful SMTP test
+means the server accepted the message submission, not that it reached the
+recipient's inbox or created a Sent Items copy. The activated settings are
+applied to web requests and queue workers without writing plaintext credentials
+to environment files or logs. Plain SMTP is allowed only in local development.
+This is separate from the Microsoft Graph outbox used for approved operational
+mail.
+
+First-Admin SMTP diagnostics are disabled by default. When explicitly enabled
+for an isolated troubleshooting deployment, a failed bootstrap test logs only
+the protocol stage, an actual SMTP response code when observed, and the
+exception type; credentials, addresses, message content, raw replies, and SMTP
+transcripts are excluded.
 
 An independent one-way Contact projection writes FieldOps Contact data to the
 designated shared mailbox's default Outlook Contacts folder only after QBO
@@ -193,6 +217,14 @@ or attachment-notification UI is part of this workflow.
 ## Boundaries
 
 QuickBooks owns accounting and is the initial authority for synchronized customer and item information. FieldOps owns technician workflow, sites as operational records, jobs, projects, schedules, visits, timeline events, notes, documents, communication history, and job item usage.
+
+## Current deployment and portability
+
+FieldOps currently runs on local Proxmox VE LXCs: production application
+containers, development/build/test, and PostgreSQL are hosted in separate LXCs.
+The application host uses rootless Docker Compose; Cloudflare Tunnel provides
+the public ingress. Azure is not the current deployment target. See the
+deployment runbook for environment-specific host details.
 
 ## Azure portability
 

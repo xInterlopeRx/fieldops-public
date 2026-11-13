@@ -14,11 +14,13 @@ class Site extends Model
 
     protected $fillable = [
         'customer_id',
+        'fieldpulse_id',
         'import_source',
         'name',
         'company_name',
         'preferred_delivery_method',
         'address',
+        'primary_contact_id',
         'metadata',
         'quickbooks_id',
         'quickbooks_sync_token',
@@ -76,6 +78,11 @@ class Site extends Model
     public function customerAddresses(): HasMany
     {
         return $this->hasMany(CustomerAddress::class, 'source_site_id');
+    }
+
+    public function primaryContact(): BelongsTo
+    {
+        return $this->belongsTo(Contact::class, 'primary_contact_id');
     }
 
     public function sharePointAttachments(): HasMany

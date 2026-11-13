@@ -11,6 +11,7 @@ use App\Http\Requests\UpdateWorkOrderStatusRequest;
 use App\Http\Requests\UploadWorkOrderAttachmentsRequest;
 use App\Jobs\SyncVisitMicrosoftGraphEvent;
 use App\Models\Customer;
+use App\Models\Project;
 use App\Models\Site;
 use App\Models\User;
 use App\Models\Visit;
@@ -44,7 +45,7 @@ class WorkOrderController extends Controller
         $this->authorizeAccess($request, $workOrder);
 
         $workOrder->load([
-            'site.customer.sites',
+            'site.customer.sites.primaryContact',
             'site.customer.contacts',
             'project',
             'clientContact',
@@ -113,13 +114,20 @@ class WorkOrderController extends Controller
         VisitSchedulingService $scheduling,
         SharePointAttachmentUploadService $attachmentUploads,
         AttachmentLifecycleService $attachmentEvents,
-    ): RedirectResponse {
+    ): RedirectResponse|JsonResponse {
         $scheduledAt = $request->string('status')->toString() === 'scheduled'
             ? $request->date('scheduled_at')
             : null;
         $conflict = $scheduledAt === null ? null : $scheduling->conflictFor($request->user(), $scheduledAt);
 
         if ($conflict !== null && ! $request->boolean('scheduling_override')) {
+            if ($request->expectsJson()) {
+                return response()->json([
+                    'message' => 'The selected time conflicts with existing work.',
+                    'errors' => ['scheduled_at' => [$conflict]],
+                ], 422);
+            }
+
             return back()->withErrors(['scheduled_at' => $conflict]);
         }
 
@@ -129,10 +137,17 @@ class WorkOrderController extends Controller
             [$workOrder, $history] = DB::transaction(function () use ($request, $assignments, $statusHistory, $attachmentUploads, &$attachmentUploadStarted): array {
                 $customer = $this->resolveCustomer($request);
                 $site = $this->resolveSite($request, $customer);
+                $project = $request->integer('project_id') > 0
+                    ? Project::query()->findOrFail($request->integer('project_id'))
+                    : null;
+                if ($project !== null) {
+                    $project->sites()->syncWithoutDetaching([$site->getKey()]);
+                }
                 $customer->loadMissing('contacts');
                 $contactFields = $this->contactFields($request, $customer);
                 $workOrder = WorkOrder::create([
                     'site_id' => $site->id,
+                    'project_id' => $project?->getKey(),
                     'job_number' => $this->nextJobNumber(),
                     'title' => $request->string('title')->toString(),
                     'subtitle' => $request->input('subtitle'),
@@ -216,6 +231,21 @@ class WorkOrderController extends Controller
             $message .= ' New site sync to QuickBooks queued.';
         } elseif ($siteWriteStatus === 'paused') {
             $message .= ' QuickBooks sync is paused; the new Site is queued and held until sync resumes.';
+        }
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'data' => [
+                    'id' => $workOrder->getKey(),
+                    'number' => $workOrder->job_number,
+                    'title' => $workOrder->title,
+                    'status' => $workOrder->status,
+                    'customerId' => $site?->customer_id,
+                    'siteId' => $site?->getKey(),
+                    'projectId' => $workOrder->project_id,
+                ],
+                'message' => $message,
+            ], 201);
         }
 
         return redirect()->route('calendar')->with('success', $message);

@@ -9,6 +9,10 @@ class SharePointAttachment extends Model
 {
     protected $table = 'sharepoint_attachments';
 
+    public const TARGET_WORK_SCHEDULES = 'work_schedules';
+
+    public const TARGET_BUSINESS_ATTACHMENTS = 'business_attachments';
+
     protected $fillable = [
         'company_id',
         'site_id',
@@ -18,6 +22,8 @@ class SharePointAttachment extends Model
         'filename',
         'mime_type',
         'file_size',
+        'sharepoint_site_id',
+        'sharepoint_target',
         'sharepoint_drive_id',
         'sharepoint_item_id',
         'sharepoint_url',
@@ -26,6 +32,8 @@ class SharePointAttachment extends Model
 
     protected $hidden = [
         'client_upload_id',
+        'sharepoint_site_id',
+        'sharepoint_target',
     ];
 
     protected $casts = [

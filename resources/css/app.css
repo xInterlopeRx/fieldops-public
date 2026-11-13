@@ -1239,6 +1239,43 @@
     outline-offset: 1px;
 }
 
+.fieldops-clearable-search--with-action .fieldops-clearable-search__input {
+    min-height: 2.75rem;
+    padding-right: 6rem;
+}
+
+.fieldops-clearable-search--with-action .fieldops-clearable-search__clear {
+    right: 2.9rem;
+    width: 2.75rem;
+}
+
+.fieldops-clearable-search__action {
+    position: absolute;
+    top: 50%;
+    right: 0.25rem;
+    display: inline-grid;
+    width: 2.75rem;
+    height: 2.75rem;
+    transform: translateY(-50%);
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    color: var(--fieldops-blue-dark);
+    cursor: pointer;
+}
+
+.fieldops-clearable-search__action:hover {
+    background: transparent !important;
+}
+
+.fieldops-clearable-search__action:focus-visible {
+    outline: 3px solid var(--fieldops-blue-strong);
+    outline-offset: 2px;
+}
+
 .fieldops-global-search__suggestions {
     position: absolute;
     z-index: 80;
@@ -2200,4 +2237,119 @@ select:not([multiple]) {
         padding-bottom: 0.4rem;
     }
 
+    .fieldops-job-workspace .fieldops-job-workspace__header-action {
+        width: 2rem;
+        min-width: 2rem;
+        height: 2rem;
+        min-height: 2rem;
+        padding: 0;
+    }
+
+}
+
+.fieldops-clearable-search--with-action .fieldops-clearable-search__input.fieldops-directory-search-input {
+    height: 2.75rem;
+    min-height: 2.75rem;
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+}
+
+.fieldops-client-input.fieldops-entity-picker-input,
+.fieldops-clearable-search__input.fieldops-entity-picker-input {
+    height: 2.75rem;
+    min-height: 2.75rem;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.65rem;
+    font-size: 0.875rem;
+}
+
+.fieldops-entity-picker-add-button {
+    display: inline-flex;
+    width: 2.75rem;
+    min-width: 2.75rem;
+    height: 2.75rem;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--fieldops-success-light);
+    border-radius: 0.5rem;
+    background: var(--fieldops-success-light);
+    color: var(--fieldops-success-dark);
+    padding: 0;
+    transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.fieldops-entity-picker-add-button:not(:disabled):hover {
+    border-color: var(--fieldops-success);
+    background: var(--fieldops-success);
+    color: var(--fieldops-white);
+}
+
+.fieldops-entity-picker-add-button:disabled {
+    border-color: #d1d5db;
+    background: #f3f4f6;
+    color: #6b7280;
+    cursor: not-allowed;
+    opacity: 1;
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__header-control {
+    height: 2.75rem;
+    min-height: 2.75rem;
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__status-select {
+    border-radius: 0.5rem;
+    padding: 0.35rem 2rem 0.35rem 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__status-select.fieldops-status-badge--gray {
+    border-color: var(--fieldops-slate);
+    background-color: var(--fieldops-slate-light);
+    color: var(--fieldops-slate-dark);
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__status-select.fieldops-status-badge--blue {
+    border-color: var(--fieldops-blue-dark);
+    background-color: var(--fieldops-blue-light);
+    color: var(--fieldops-blue-strong);
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__status-select.fieldops-status-badge--purple {
+    border-color: var(--fieldops-purple-dark);
+    background-color: var(--fieldops-purple-light);
+    color: var(--fieldops-purple-dark);
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__status-select.fieldops-status-badge--orange {
+    border-color: var(--fieldops-warning-dark);
+    background-color: var(--fieldops-warning-light);
+    color: var(--fieldops-warning-dark);
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__status-select.fieldops-status-badge--magenta {
+    border-color: var(--fieldops-magenta-dark);
+    background-color: var(--fieldops-magenta-light);
+    color: var(--fieldops-magenta-dark);
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__status-select.fieldops-status-badge--green {
+    border-color: var(--fieldops-success);
+    background-color: var(--fieldops-success-light);
+    color: var(--fieldops-success-dark);
+}
+
+.fieldops-job-workspace .fieldops-job-workspace__status-select.fieldops-status-badge--red {
+    border-color: var(--fieldops-danger);
+    background-color: var(--fieldops-danger-light);
+    color: var(--fieldops-danger-dark);
+}
+
+@media (pointer: fine) {
+    .fieldops-job-workspace .fieldops-job-workspace__header-control {
+        height: 2rem;
+        min-height: 2rem;
+    }
 }

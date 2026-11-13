@@ -13,18 +13,15 @@ use App\Models\QuickBooksInitialCustomerImport;
 use App\Models\QuickBooksInitialCustomerImportFailure;
 use App\Models\User;
 use App\Services\ApplicationSetupStepService;
-use App\Services\CsvCustomerSiteImportService;
 use App\Services\OnboardingReadinessService;
 use App\Services\QuickBooksApiClient;
 use App\Services\QuickBooksInitialCustomerImportService;
-use App\Services\SetCustomerImportMode;
 use App\Services\SetQuickBooksSyncOptIn;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Validation\ValidationException;
 use Laravel\Fortify\Fortify;
 use PragmaRX\Google2FA\Google2FA;
 use Tests\TestCase;
@@ -70,7 +67,7 @@ class QuickBooksInitialCustomerImportTest extends TestCase
         );
 
         (new ProcessQuickBooksInitialCustomerImport($run->getKey()))
-            ->handle(app(QuickBooksInitialCustomerImportService::class), app(CsvCustomerSiteImportService::class));
+            ->handle(app(QuickBooksInitialCustomerImportService::class));
 
         $run->refresh();
         $this->assertSame(QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE, $run->status);
@@ -94,7 +91,7 @@ class QuickBooksInitialCustomerImportTest extends TestCase
         $this->assertSame(ApplicationSetupStep::STATUS_IN_PROGRESS, $step->status);
         $this->assertSame(1, $step->progress_current);
         $this->assertFalse(app(OnboardingReadinessService::class)->snapshot()['ready']);
-        $this->assertContains('Initial QuickBooks Customer/Site/Item import', app(OnboardingReadinessService::class)->snapshot()['blockers']);
+        $this->assertContains('Initial Customer/Site import', app(OnboardingReadinessService::class)->snapshot()['blockers']);
     }
 
     public function test_invalid_hierarchy_is_recorded_per_customer_and_resume_retries_idempotently(): void
@@ -110,7 +107,7 @@ class QuickBooksInitialCustomerImportTest extends TestCase
 
         $run = app(QuickBooksInitialCustomerImportService::class)->start($admin);
         (new ProcessQuickBooksInitialCustomerImport($run->getKey()))
-            ->handle(app(QuickBooksInitialCustomerImportService::class), app(CsvCustomerSiteImportService::class));
+            ->handle(app(QuickBooksInitialCustomerImportService::class));
 
         $run->refresh();
         $failure = QuickBooksInitialCustomerImportFailure::query()->sole();
@@ -137,7 +134,7 @@ class QuickBooksInitialCustomerImportTest extends TestCase
         Queue::assertPushed(ProcessQuickBooksInitialCustomerImport::class, 2);
 
         (new ProcessQuickBooksInitialCustomerImport($run->getKey()))
-            ->handle(app(QuickBooksInitialCustomerImportService::class), app(CsvCustomerSiteImportService::class));
+            ->handle(app(QuickBooksInitialCustomerImportService::class));
 
         $this->assertSame(QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE, $run->fresh()->status);
         $this->assertDatabaseCount('quickbooks_initial_customer_import_failures', 0);
@@ -159,7 +156,7 @@ class QuickBooksInitialCustomerImportTest extends TestCase
         $connection->forceFill(['realm_id' => 'different-sandbox-company'])->save();
 
         (new ProcessQuickBooksInitialCustomerImport($run->getKey()))
-            ->handle(app(QuickBooksInitialCustomerImportService::class), app(CsvCustomerSiteImportService::class));
+            ->handle(app(QuickBooksInitialCustomerImportService::class));
 
         $this->assertSame(QuickBooksInitialCustomerImport::STATUS_FAILED, $run->fresh()->status);
         $this->assertSame('quickbooks_import_company_changed', $run->fresh()->failure_code);
@@ -190,7 +187,7 @@ class QuickBooksInitialCustomerImportTest extends TestCase
 
         $run = app(QuickBooksInitialCustomerImportService::class)->start($admin);
         (new ProcessQuickBooksInitialCustomerImport($run->getKey()))
-            ->handle(app(QuickBooksInitialCustomerImportService::class), app(CsvCustomerSiteImportService::class));
+            ->handle(app(QuickBooksInitialCustomerImportService::class));
 
         $run->refresh();
         $this->assertSame(QuickBooksInitialCustomerImport::STATUS_FAILED, $run->status);
@@ -225,7 +222,7 @@ class QuickBooksInitialCustomerImportTest extends TestCase
         $parentCount = 2;
 
         (new ProcessQuickBooksInitialCustomerImport($run->getKey()))
-            ->handle(app(QuickBooksInitialCustomerImportService::class), app(CsvCustomerSiteImportService::class));
+            ->handle(app(QuickBooksInitialCustomerImportService::class));
 
         $this->assertSame('qbo_customer_set_changed', $run->fresh()->failure_code);
         $this->assertSame(1, $run->fresh()->next_start_position);
@@ -233,13 +230,10 @@ class QuickBooksInitialCustomerImportTest extends TestCase
         $this->assertDatabaseCount('customers', 0);
     }
 
-    public function test_completed_csv_import_can_be_preserved_while_starting_a_separate_quickbooks_import_later(): void
+    public function test_completed_local_import_is_preserved_when_a_quickbooks_import_starts_later(): void
     {
         $admin = $this->setupReadyAdmin();
-        ApplicationSetupState::query()->whereKey(1)->update([
-            'quickbooks_import_mode' => ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_CSV,
-        ]);
-        $csvRun = QuickBooksInitialCustomerImport::query()->create([
+        $localRun = QuickBooksInitialCustomerImport::query()->create([
             'environment' => app()->environment(),
             'source' => QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD,
             'realm_id' => null,
@@ -253,28 +247,13 @@ class QuickBooksInitialCustomerImportTest extends TestCase
             'started_at' => now()->subMinute(),
             'customer_sites_completed_at' => now(),
         ]);
-        $csvCustomer = Customer::query()->create([
+        $localCustomer = Customer::query()->create([
             'client_id' => 'C01001',
             'source_customer_id' => 'CSV-1001',
             'import_source' => QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD,
-            'name' => 'CSV Local Customer',
+            'name' => 'Local Customer',
         ]);
 
-        try {
-            app(SetCustomerImportMode::class)->change(
-                $admin,
-                ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API,
-            );
-            $this->fail('Switching a completed CSV import to API mode must require explicit duplicate-risk confirmation.');
-        } catch (ValidationException $exception) {
-            $this->assertArrayHasKey('confirm_api_transition', $exception->errors());
-        }
-
-        app(SetCustomerImportMode::class)->change(
-            $admin,
-            ApplicationSetupState::QUICKBOOKS_IMPORT_MODE_API,
-            confirmCsvApiTransition: true,
-        );
         app(SetQuickBooksSyncOptIn::class)->update($admin, true);
         config([
             'services.quickbooks.environment' => 'sandbox',
@@ -291,10 +270,9 @@ class QuickBooksInitialCustomerImportTest extends TestCase
         $apiRun = app(QuickBooksInitialCustomerImportService::class)->start($admin);
 
         $this->assertSame(QuickBooksInitialCustomerImport::SOURCE_QUICKBOOKS_API, $apiRun->source);
-        $this->assertSame(QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE, $csvRun->fresh()->status);
-        $this->assertSame(QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD, $csvRun->fresh()->source);
-        $this->assertSame(QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD, $csvCustomer->fresh()->import_source);
-        $this->assertNull($csvCustomer->fresh()->quickbooks_id);
+        $this->assertSame(QuickBooksInitialCustomerImport::STATUS_CUSTOMER_SITES_COMPLETE, $localRun->fresh()->status);
+        $this->assertSame(QuickBooksInitialCustomerImport::SOURCE_CSV_UPLOAD, $localCustomer->fresh()->import_source);
+        $this->assertNull($localCustomer->fresh()->quickbooks_id);
         $this->assertDatabaseCount('quickbooks_initial_customer_imports', 2);
         Queue::assertPushed(ProcessQuickBooksInitialCustomerImport::class);
         Http::assertSentCount(2);

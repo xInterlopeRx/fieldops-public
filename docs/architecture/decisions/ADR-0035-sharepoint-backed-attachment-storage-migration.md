@@ -1,8 +1,8 @@
 # ADR-0035: SharePoint-backed Attachment Storage Migration Strategy
 
-- Status: Accepted for the A4 new-upload bridge, A5 bounded previews, A6 Office/SharePoint launch links, and A7 queued upload UX; broader migration/cutover remains proposed
+- Status: Accepted for A4-A7 and the narrowly scoped Work Schedules-to-Business-Attachments relocation of existing SharePoint rows; local-attachment backend migration remains deferred
 - Date: 2026-10-05
-- Related: ADR-0021 (recoverable business archives), ADR-0023 (Graph notifications), ADR-0034 (repository-document-only SharePoint sync), ADR-0036 (proposed SharePoint storage structure)
+- Related: ADR-0021 (recoverable business archives), ADR-0023 (Graph notifications), ADR-0034 (repository-document-only SharePoint sync), ADR-0036 (SharePoint storage structure)
 
 ## Context
 
@@ -18,9 +18,11 @@ attachment rows and direct local consumers in place.
 
 The connected SharePoint operations in ADR-0034 are restricted to allowlisted
 repository Markdown. They are not an approved general business-file store.
-The proposed Business Attachments Site/library structure is documented in
-ADR-0036. Its provisioning, audience, resource permissions, retention, and
-source-of-truth policy remain undecided. See the A1 audit report at
+The Business Attachments Site/library structure is documented in ADR-0036. Its
+provisioning, audience, resource permissions, retention, and source-of-truth
+policy were not decided when this ADR was first accepted. The later target and
+commissioning evidence are documented in ADR-0036 and
+`docs/integrations/MICROSOFT-GRAPH.md`. See the A1 audit report at
 [`docs/architecture/ATTACHMENT-AUDIT.md`](../ATTACHMENT-AUDIT.md).
 
 ## Decision
@@ -57,6 +59,58 @@ preserve all existing local attachment tables, rows, bytes, and URLs.
   was changed and no live business-file upload was performed. Keep the feature
   flag off until the target and permission boundary are explicitly verified for
   the deployment.
+
+### Approved SharePoint target relocation
+
+- The 2026-11-05 production inventory found 5,442 active `sharepoint_attachments`
+  rows on Work Schedules: 5,407 Job-linked and 35 Customer-level, with no
+  Project-linked rows. This relocates existing SharePoint DriveItems; it is not
+  the deferred migration of legacy local attachment tables or a general storage
+  backend cutover.
+- New uploads resolve to the saved Business Attachments target only after the
+  onboarding runtime target, current exact-target evidence, and SharePoint
+  canary are valid and the Business Attachments write-activation receipt exists.
+  Before then, managed-target installations fail closed instead of silently
+  writing to Work Schedules. `MICROSOFT_GRAPH_SHAREPOINT_ENABLED` remains the
+  emergency/provider gate, not the Business Attachments readiness signal.
+  Repository Markdown remains on Work Schedules.
+- Each attachment stores its SharePoint Site ID, named target, Drive ID, and
+  DriveItem ID. Reads use the saved Drive ID so source and destination rows can
+  coexist during a resumable cutover. Destination names are deterministic from
+  internal attachment/customer IDs; each copy is checked for expected size,
+  MIME type, and SHA-256 before FieldOps updates only its storage pointers.
+  The narrowly approved `.eml` exception accepts destination MIME
+  `message/rfc822` when the expected source MIME is `text/plain`, but only when
+  source/destination sizes and SHA-256 hashes match exactly; both MIME values
+  are recorded in the per-attachment audit. A recorded-size correction is
+  allowed only as a separate, explicitly authorized per-ID action after bounded
+  Graph metadata and content agree; the audit records prior/new sizes and the
+  verified source hash. Customer/Job/Project/Site/uploader associations are
+  unchanged.
+- The migration command is read-only by default. Execution is bounded and
+  resumable; retries reuse a destination object only after rechecking its bytes.
+  The original Work Schedules DriveItems are deliberately retained for rollback.
+  Business Attachments writes may activate automatically only after final
+  inventory confirms every attachment pointer is on the verified target and no
+  unexpected rows remain. Mail, Calendar, and Outlook Contact writes are
+  independent and are not changed by this operation.
+- Invoices are excluded. The three MP4s larger than the upload limit were never
+  uploaded and are not part of this inventory or relocation.
+- Production migration completed on the local Proxmox LXC target. The additive
+  schema is live and the global SharePoint provider gate is enabled. The
+  operator accepted SharePoint's OOXML size/hash
+  transformation after a bounded package check: package paths must match, only
+  `docProps/` or `customXml/` entry contents may differ, and workbook/document/
+  presentation parts must remain byte-identical. Source and destination sizes
+  and SHA-256 values are recorded in each attachment's rollback audit. r8
+  implements the approved `.eml` MIME alias and size-reconciliation path. For
+  #2826, the source size correction was audited, then the operator explicitly
+  approved the existing same-size/MIME but byte-different Business copy. r8
+  re-verified both files and recorded an acceptance audit with both hashes before
+  updating the pointer. Neither copy was overwritten or deleted. All 5,442
+  pointers now resolve to Business Attachments with complete rollback audits;
+  the Business write receipt is active only after this reconciliation. Mail,
+  Calendar, and Outlook Contact writes remain off. See `TASKLOG.md` for details.
 
 ### A5 bounded preview and thumbnail bridge
 
@@ -131,9 +185,12 @@ preserve all existing local attachment tables, rows, bytes, and URLs.
 - Use MIME/extension-derived file-type icons beside filenames. Filenames still
   identify the file type; color and icons are not the only status indicators.
 
-The broader migration sequence below remains proposed and must be completed
-before migrating legacy rows, changing their content source, or retiring local
-copies.
+The broader migration sequence below remains proposed for moving the separate
+legacy `customer_attachments`, `project_attachments`, and
+`work_order_attachments` local-storage records to a provider-neutral backend.
+It is not a prerequisite for the narrowly scoped SharePoint Drive relocation
+above. Local files and both SharePoint copies remain subject to their own
+retention and rollback decisions.
 
 For a future implementation, prefer an additive migration that:
 

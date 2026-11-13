@@ -29,7 +29,7 @@ class PayrollReportRequest extends FormRequest
 
     public function authorize(): bool
     {
-        return $this->user()?->can('reviewAny', TimeEntry::class) ?? false;
+        return $this->user()?->can('viewFinancial', TimeEntry::class) ?? false;
     }
 
     /**
